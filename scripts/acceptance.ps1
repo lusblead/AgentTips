@@ -13,7 +13,8 @@ $steps = @(
     @{ Name = "pnpm build"; Command = "pnpm build" },
     @{ Name = "cargo fmt"; Command = "cargo fmt --check --manifest-path src-tauri/Cargo.toml" },
     @{ Name = "cargo clippy"; Command = "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings" },
-    @{ Name = "cargo test"; Command = "cargo test --manifest-path src-tauri/Cargo.toml" }
+    @{ Name = "cargo test"; Command = "cargo test --manifest-path src-tauri/Cargo.toml" },
+    @{ Name = "pnpm test:tauri-ui (real WebView UI chain)"; Command = "pnpm test:tauri-ui" }
 )
 
 $failed = @()

@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:tauri-ui": "node scripts/tauri-ui-vertical-chain.mjs",
     "check:architecture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-architecture.ps1",
     "acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance.ps1"
   },

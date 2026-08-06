@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -43,12 +44,28 @@ impl SqliteDatabase {
     fn init(conn: Connection) -> AppResult<Self> {
         conn.pragma_update(None, "foreign_keys", true)
             .map_err(AppError::from)?;
+        // 单连接 Mutex 串行化自身访问；busy_timeout 防止与外部进程短暂写竞争时报 locked。
+        conn.busy_timeout(Duration::from_millis(5000))
+            .map_err(AppError::from)?;
         run_migrations(&conn)?;
         seed_builtin_agents(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
+}
+
+/// 单版本迁移：schema DDL 与版本记录在同一事务，中途失败整体回滚。
+fn apply_migration(conn: &Connection, version: i64, sql: &str) -> AppResult<()> {
+    let tx = conn.unchecked_transaction().map_err(AppError::from)?;
+    tx.execute_batch(sql).map_err(AppError::from)?;
+    tx.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+        params![version, Utc::now().to_rfc3339()],
+    )
+    .map_err(AppError::from)?;
+    tx.commit().map_err(AppError::from)?;
+    Ok(())
 }
 
 fn run_migrations(conn: &Connection) -> AppResult<()> {
@@ -72,14 +89,7 @@ fn run_migrations(conn: &Connection) -> AppResult<()> {
         if applied.is_some() {
             continue;
         }
-        let tx = conn.unchecked_transaction().map_err(AppError::from)?;
-        tx.execute_batch(sql).map_err(AppError::from)?;
-        tx.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-            params![version, Utc::now().to_rfc3339()],
-        )
-        .map_err(AppError::from)?;
-        tx.commit().map_err(AppError::from)?;
+        apply_migration(conn, *version, sql)?;
     }
     Ok(())
 }
@@ -425,6 +435,7 @@ mod tests {
     use super::*;
     use crate::domain::agents::AgentKind;
     use crate::domain::tips::TipStatus;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn now() -> DateTime<Utc> {
@@ -554,6 +565,129 @@ mod tests {
             assert_eq!(second.len(), 6, "restart must not duplicate builtin agents");
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn busy_timeout_is_configured() {
+        let db = SqliteDatabase::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        let timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, 5000, "busy_timeout must be 5000ms");
+    }
+
+    #[test]
+    fn every_new_connection_enables_foreign_keys() {
+        let db = SqliteDatabase::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn migration_failure_rolls_back_and_does_not_write_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        // 坏 SQL：第二条语句引用不存在表
+        let bad_sql = "CREATE TABLE temp_migrate (id TEXT); INSERT INTO missing_table VALUES (1);";
+        assert!(apply_migration(&conn, 99, bad_sql).is_err());
+        let version: Option<i64> = conn
+            .query_row(
+                "SELECT version FROM schema_migrations WHERE version = 99",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert!(
+            version.is_none(),
+            "failed migration must not record version"
+        );
+        // 表也不应残留
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'temp_migrate'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "failed migration DDL must be rolled back");
+    }
+
+    #[test]
+    fn concurrent_list_calls_do_not_fail() {
+        let db = Arc::new(SqliteDatabase::open_in_memory().unwrap());
+        let agents = AgentRepository::list(&*db).unwrap();
+        let tip = sample_tip(
+            Uuid::new_v4(),
+            Some("并发"),
+            "并发数据",
+            &[binding(agents[0].id, true, 0)],
+        );
+        TipRepository::create_with_bindings(&*db, &tip, &tip.bindings).unwrap();
+
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let db = db.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..20 {
+                        TipRepository::list(&*db, &TipQuery::default())
+                            .expect("list must not fail");
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("list thread must not panic");
+        }
+    }
+
+    #[test]
+    fn concurrent_list_and_create_do_not_panic() {
+        let db = Arc::new(SqliteDatabase::open_in_memory().unwrap());
+        let agents = AgentRepository::list(&*db).unwrap();
+        let agent_id = agents[0].id;
+
+        let reader = {
+            let db = db.clone();
+            std::thread::spawn(move || {
+                for _ in 0..20 {
+                    TipRepository::list(&*db, &TipQuery::default()).expect("list must not fail");
+                }
+            })
+        };
+        let writer = {
+            let db = db.clone();
+            std::thread::spawn(move || {
+                for i in 0..20 {
+                    let tip = sample_tip(
+                        Uuid::new_v4(),
+                        Some(&format!("写入 {i}")),
+                        "并发写入",
+                        &[binding(agent_id, true, 0)],
+                    );
+                    TipRepository::create_with_bindings(&*db, &tip, &tip.bindings)
+                        .expect("create must not fail");
+                }
+            })
+        };
+        reader.join().expect("reader must not panic");
+        writer.join().expect("writer must not panic");
+        assert_eq!(
+            TipRepository::list(&*db, &TipQuery::default())
+                .unwrap()
+                .len(),
+            20
+        );
     }
 
     // ---------- repository 集成测试 ----------

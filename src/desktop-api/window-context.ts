@@ -25,18 +25,14 @@ function kindFromLabel(label: string | null): WindowKind {
 }
 
 export function getWindowContext(): WindowContext {
-  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-  if (isTauri) {
-    const label =
-      (window as unknown as { __TAURI_WINDOW_LABEL__?: string }).__TAURI_WINDOW_LABEL__ ?? null;
-    return { kind: kindFromLabel(label) };
-  }
-
   const params = new URLSearchParams(window.location.search);
   const kind = kindFromLabel(params.get("window"));
   const demo = params.get("demo");
   const reminderDemo = demo === "collapsed" || demo === "empty" ? demo : undefined;
   const initialAgentId = params.get("agentId") ?? undefined;
   const emptyData = params.get("empty") === "1";
+  // 当前为单窗口阶段（Phase 2 / 2.1）：统一由 URL 查询参数决定调试路由。
+  // Phase 3 引入多窗口后，Tauri 分支改为读取 WebviewWindow label，
+  // 浏览器分支继续使用 URL 参数，两者在本适配器内合并，feature 不感知。
   return { kind, reminderDemo, initialAgentId, emptyData };
 }

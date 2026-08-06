@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type DesktopApi } from "@/desktop-api/contract";
 import { MockDesktopApi, getWindowContext } from "@/desktop-api";
+import type { WindowContext } from "@/desktop-api";
 import { TauriDesktopApi } from "@/desktop-api/tauri-adapter";
 import QuickNoteWindow from "@/features/quick-note";
 import NoteLibraryWindow from "@/features/note-library";
@@ -17,13 +18,22 @@ import HotkeySettingsWindow from "@/features/hotkey-settings";
  * Phase 2 起由 TauriDesktopApi 替换 MockDesktopApi。
  */
 export default function App() {
-  const context = useMemo(() => getWindowContext(), []);
+  const [context, setContext] = useState<WindowContext>(() => getWindowContext());
+  useEffect(() => {
+    const update = () => {
+      setContext(getWindowContext());
+    };
+    window.addEventListener("popstate", update);
+    window.addEventListener("agenttips:route", update);
+    return () => {
+      window.removeEventListener("popstate", update);
+      window.removeEventListener("agenttips:route", update);
+    };
+  }, []);
+  const isTauri = "__TAURI_INTERNALS__" in window;
   const api = useMemo<DesktopApi>(
-    () =>
-      "__TAURI_INTERNALS__" in window
-        ? new TauriDesktopApi()
-        : new MockDesktopApi({ withSeed: !context.emptyData }),
-    [context.emptyData],
+    () => (isTauri ? new TauriDesktopApi() : new MockDesktopApi({ withSeed: !context.emptyData })),
+    [context.emptyData, isTauri],
   );
   const navigateTo = (windowKind: string, extra?: Record<string, string>) => {
     const url = new URL(window.location.href);
@@ -31,33 +41,50 @@ export default function App() {
     for (const [key, value] of Object.entries(extra ?? {})) {
       url.searchParams.set(key, value);
     }
-    window.location.assign(url.toString());
+    // 同文档路由切换（开发调试与浏览器模式），由 popstate 驱动窗口上下文更新。
+    window.history.pushState({}, "", url.toString());
+    window.dispatchEvent(new PopStateEvent("popstate"));
   };
+
+  // 仅开发模式暴露 adapter 标识，供真实 Tauri UI 验收断言，不泄漏生产信息。
+  const adapterMarker = import.meta.env.DEV ? (isTauri ? "tauri" : "mock") : undefined;
 
   switch (context.kind) {
     case "quick-note":
-      return <QuickNoteWindow api={api} onClose={() => window.close()} />;
+      return (
+        <div data-desktop-adapter={adapterMarker}>
+          <QuickNoteWindow api={api} onClose={() => window.close()} />
+        </div>
+      );
     case "reminder":
       return (
-        <ReminderWindow
-          api={api}
-          demo={context.reminderDemo}
-          onOpenMain={(agentId) => {
-            navigateTo("main", { agentId });
-          }}
-        />
+        <div data-desktop-adapter={adapterMarker}>
+          <ReminderWindow
+            api={api}
+            demo={context.reminderDemo}
+            onOpenMain={(agentId) => {
+              navigateTo("main", { agentId });
+            }}
+          />
+        </div>
       );
     case "settings":
-      return <HotkeySettingsWindow api={api} />;
+      return (
+        <div data-desktop-adapter={adapterMarker}>
+          <HotkeySettingsWindow api={api} />
+        </div>
+      );
     case "main":
     default:
       return (
-        <NoteLibraryWindow
-          api={api}
-          initialAgentId={context.initialAgentId}
-          onNewTip={() => navigateTo("quick-note")}
-          onOpenSettings={() => navigateTo("settings")}
-        />
+        <div data-desktop-adapter={adapterMarker}>
+          <NoteLibraryWindow
+            api={api}
+            initialAgentId={context.initialAgentId}
+            onNewTip={() => navigateTo("quick-note")}
+            onOpenSettings={() => navigateTo("settings")}
+          />
+        </div>
       );
   }
 }

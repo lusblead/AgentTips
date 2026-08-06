@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import App from "./App";
 
 function visit(path: string) {
@@ -31,6 +31,21 @@ describe("窗口路由", () => {
     visit("/?window=settings");
     render(<App />);
     expect(await screen.findByText("设置")).toBeInTheDocument();
+  });
+
+  it("popstate 事件可切换窗口", async () => {
+    visit("/?window=main");
+    const { unmount } = render(<App />);
+    await screen.findByText("提示库");
+    window.history.pushState({}, "", "/?window=quick-note");
+    const { getWindowContext } = await import("@/desktop-api");
+    expect(getWindowContext().kind).toBe("quick-note");
+    act(() => {
+      window.dispatchEvent(new Event("agenttips:route"));
+    });
+    expect(await screen.findByText("新建提示")).toBeInTheDocument();
+    expect(screen.getByLabelText("正文")).toBeInTheDocument();
+    unmount();
   });
 });
 

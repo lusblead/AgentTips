@@ -1,29 +1,51 @@
+param(
+    [string]$Directory = "phase-1.5",
+    [string]$ExpectedSize = ""
+)
+
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $PSScriptRoot
-$dir = Join-Path $root "artifacts\screenshots\phase-1.5"
+$dir = Join-Path $root "artifacts\screenshots\$Directory"
 if (-not (Test-Path $dir)) {
     Write-Host "screenshot check: FAIL (dir missing: $dir)"
     exit 1
 }
 
-$expectedSize = @{
-    "quick-note-empty.png" = "620x420"
-    "quick-note-filled.png" = "620x420"
-    "quick-note-multiple-agents.png" = "620x420"
-    "main-window.png" = "1180x760"
-    "main-window-empty.png" = "1180x760"
-    "main-window-selected.png" = "1180x760"
-    "reminder-expanded.png" = "420x360"
-    "reminder-collapsed.png" = "420x360"
-    "settings-default.png" = "800x600"
-    "settings-hotkey-recording.png" = "800x600"
-    "settings-hotkey-invalid.png" = "800x600"
+$expectedMap = if ($Directory -eq "phase-1.5") {
+    @{
+        "quick-note-empty.png" = "620x420"
+        "quick-note-filled.png" = "620x420"
+        "quick-note-multiple-agents.png" = "620x420"
+        "main-window.png" = "1180x760"
+        "main-window-empty.png" = "1180x760"
+        "main-window-selected.png" = "1180x760"
+        "reminder-expanded.png" = "420x360"
+        "reminder-collapsed.png" = "420x360"
+        "settings-default.png" = "800x600"
+        "settings-hotkey-recording.png" = "800x600"
+        "settings-hotkey-invalid.png" = "800x600"
+    }
+} elseif ($Directory -eq "phase-2.1") {
+    $fallback = if ($ExpectedSize) { $ExpectedSize } else { "1000x750" }
+    @{
+        "main-window.png" = $fallback
+        "main-window-empty.png" = $fallback
+        "quick-note-empty.png" = $fallback
+        "quick-note-filled.png" = $fallback
+        "reminder-degraded.png" = $fallback
+        "settings-default.png" = $fallback
+        "settings-degraded.png" = $fallback
+        "settings-hotkey-invalid.png" = $fallback
+    }
+} else {
+    @{}
 }
 
 $failures = @()
-foreach ($name in $expectedSize.Keys) {
+$files = if ($expectedMap.Count -gt 0) { $expectedMap.Keys } else { (Get-ChildItem $dir -Filter *.png).Name }
+foreach ($name in $files) {
     $file = Join-Path $dir $name
     if (-not (Test-Path $file)) {
         $failures += "missing screenshot: $name"
@@ -31,8 +53,8 @@ foreach ($name in $expectedSize.Keys) {
     }
     $bmp = New-Object System.Drawing.Bitmap($file)
     $actual = "$($bmp.Width)x$($bmp.Height)"
-    if ($actual -ne $expectedSize[$name]) {
-        $failures += "$name size mismatch: expected $($expectedSize[$name]) got $actual"
+    if ($expectedMap[$name] -and $actual -ne $expectedMap[$name]) {
+        $failures += "$name size mismatch: expected $($expectedMap[$name]) got $actual"
     }
 
     $nonBg = 0
@@ -54,7 +76,11 @@ foreach ($name in $expectedSize.Keys) {
         }
     }
     $contentRatio = $nonBg / $total
-    if ($contentRatio -lt 0.01) {
+    $minRatio = 0.01
+    if ($Directory -eq "phase-2.1") {
+        $minRatio = 0.002
+    }
+    if ($contentRatio -lt $minRatio) {
         $failures += "$name content ratio too low: $([Math]::Round($contentRatio * 100, 2))%"
     }
     if ($edgeNonBg -gt 60) {

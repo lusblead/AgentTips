@@ -9,10 +9,15 @@
 export type AgentKind = "desktop" | "terminal";
 export type TipStatus = "active" | "archived";
 
-/** 便签与 Agent 的绑定关系；默认携带属于该关系，不属于便签全局属性。 */
+/** 便签与 Agent 的绑定关系（输入用）；默认携带属于该关系，不属于便签全局属性。 */
 export interface AgentBinding {
   agentId: string;
   autoAttach: boolean;
+}
+
+/** 绑定输出 DTO：包含后端分配的稳定排序。 */
+export interface TipBindingDto extends AgentBinding {
+  sortOrder: number;
 }
 
 export interface TipSummary {
@@ -30,12 +35,13 @@ export interface TipDetail {
   content: string;
   status: TipStatus;
   updatedAt: string;
-  bindings: AgentBinding[];
+  bindings: TipBindingDto[];
 }
 
 export interface CreateTipInput {
   title?: string;
   content: string;
+  status?: "draft" | "active";
   bindings: AgentBinding[];
 }
 
@@ -94,6 +100,43 @@ export interface ReminderTip {
 export interface ReminderPreview {
   agent: ReminderPreviewAgent;
   tips: ReminderTip[];
+}
+
+/** 统一结构化错误（与 Rust AppErrorDto 对应）。 */
+export interface DesktopError {
+  code: string;
+  message: string;
+  field?: string;
+  details?: Record<string, unknown>;
+}
+
+export const ERROR_CODES = {
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  NOT_FOUND: "NOT_FOUND",
+  CONFLICT: "CONFLICT",
+  DATABASE_ERROR: "DATABASE_ERROR",
+  MIGRATION_ERROR: "MIGRATION_ERROR",
+  INTERNAL_ERROR: "INTERNAL_ERROR",
+} as const;
+
+export function isDesktopError(value: unknown): value is DesktopError {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    "message" in value &&
+    typeof (value as { message: unknown }).message === "string"
+  );
+}
+
+export function desktopErrorMessage(error: unknown): string {
+  if (isDesktopError(error)) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 /** 测试/调试辅助：让 Mock 在指定操作上失败，用于验证错误状态。 */

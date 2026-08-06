@@ -1,6 +1,7 @@
 import { useMemo } from "react";
-import type { DesktopApi } from "@/desktop-api/contract";
+import { type DesktopApi } from "@/desktop-api/contract";
 import { MockDesktopApi, getWindowContext } from "@/desktop-api";
+import { TauriDesktopApi } from "@/desktop-api/tauri-adapter";
 import QuickNoteWindow from "@/features/quick-note";
 import NoteLibraryWindow from "@/features/note-library";
 import ReminderWindow from "@/features/reminder";
@@ -18,7 +19,10 @@ import HotkeySettingsWindow from "@/features/hotkey-settings";
 export default function App() {
   const context = useMemo(() => getWindowContext(), []);
   const api = useMemo<DesktopApi>(
-    () => new MockDesktopApi({ withSeed: !context.emptyData }),
+    () =>
+      "__TAURI_INTERNALS__" in window
+        ? new TauriDesktopApi()
+        : new MockDesktopApi({ withSeed: !context.emptyData }),
     [context.emptyData],
   );
   const navigateTo = (windowKind: string, extra?: Record<string, string>) => {

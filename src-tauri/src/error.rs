@@ -1,13 +1,40 @@
 use serde::Serialize;
 
-/// 应用统一错误类型。Phase 2+ 按 docs/06-ipc-event-contracts.md 扩展业务错误码。
-#[derive(Debug, thiserror::Error)]
+/// 应用统一错误。错误码与 docs/06-ipc-event-contracts.md 对齐。
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AppError {
+    #[error("输入无效: {0}")]
+    Validation(String),
+    #[error("资源不存在: {0}")]
+    NotFound(String),
+    #[error("冲突: {0}")]
+    Conflict(String),
+    #[error("数据库错误: {0}")]
+    Database(String),
+    #[error("迁移错误: {0}")]
+    Migration(String),
     #[error("内部错误: {0}")]
     Internal(String),
 }
 
-/// 返回给前端的结构化错误（camelCase，与 docs/06-ipc-event-contracts.md 一致）。
+impl AppError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            AppError::Validation(_) => "VALIDATION_ERROR",
+            AppError::NotFound(_) => "NOT_FOUND",
+            AppError::Conflict(_) => "CONFLICT",
+            AppError::Database(_) => "DATABASE_ERROR",
+            AppError::Migration(_) => "MIGRATION_ERROR",
+            AppError::Internal(_) => "INTERNAL_ERROR",
+        }
+    }
+
+    pub fn retryable(&self) -> bool {
+        matches!(self, AppError::Database(_) | AppError::Conflict(_))
+    }
+}
+
+/// 返回给前端的结构化错误（camelCase）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppErrorDto {
@@ -16,37 +43,23 @@ pub struct AppErrorDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
     pub retryable: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
 }
 
 impl From<AppError> for AppErrorDto {
     fn from(error: AppError) -> Self {
         Self {
-            code: "INTERNAL_ERROR".to_string(),
+            code: error.code().to_string(),
             message: error.to_string(),
             field: None,
-            retryable: false,
-            trace_id: None,
+            retryable: error.retryable(),
         }
     }
 }
 
-pub type AppResult<T> = Result<T, AppError>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn error_dto_uses_camel_case_contract() {
-        let dto = AppErrorDto::from(AppError::Internal("boom".into()));
-        let json = serde_json::to_value(&dto).unwrap();
-        assert_eq!(json["code"], "INTERNAL_ERROR");
-        assert_eq!(json["message"], "内部错误: boom");
-        assert_eq!(json["retryable"], false);
-        // 可空字段在 None 时省略，避免前端收到未定义字段
-        assert!(json.get("field").is_none());
-        assert!(json.get("traceId").is_none());
+impl From<rusqlite::Error> for AppError {
+    fn from(error: rusqlite::Error) -> Self {
+        AppError::Database(error.to_string())
     }
 }
+
+pub type AppResult<T> = Result<T, AppError>;

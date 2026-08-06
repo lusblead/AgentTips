@@ -12,6 +12,7 @@ import { ConfirmActionDialog } from "@/components/shared/ConfirmActionDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { TipCard } from "@/components/shared/TipCard";
+import { desktopErrorMessage } from "@/desktop-api/contract";
 import type {
   Agent,
   AgentBinding,
@@ -69,7 +70,7 @@ export default function NoteLibraryWindow({
         setTips(list);
         return list;
       } catch (err) {
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(desktopErrorMessage(err));
         return [];
       } finally {
         setLoading(false);
@@ -90,10 +91,12 @@ export default function NoteLibraryWindow({
         if (tip) {
           setEditorTitle(tip.title);
           setEditorContent(tip.content);
-          setEditorBindings(tip.bindings.map((b) => ({ ...b })));
+          setEditorBindings(
+            tip.bindings.map((b) => ({ agentId: b.agentId, autoAttach: b.autoAttach })),
+          );
         }
       } catch (err) {
-        setDetailError(err instanceof Error ? err.message : String(err));
+        setDetailError(desktopErrorMessage(err));
       }
     },
     [api],
@@ -126,7 +129,7 @@ export default function NoteLibraryWindow({
         if (!cancelled) setAgents(list);
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setLoadError(desktopErrorMessage(err));
       });
     return () => {
       cancelled = true;
@@ -143,7 +146,7 @@ export default function NoteLibraryWindow({
         await ensureSelection(list);
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setLoadError(desktopErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -173,7 +176,7 @@ export default function NoteLibraryWindow({
       const list = await loadTips(selectedAgentId, search);
       await ensureSelection(list);
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : String(err));
+      setDetailError(desktopErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -187,7 +190,7 @@ export default function NoteLibraryWindow({
       const list = await loadTips(selectedAgentId, search);
       await ensureSelection(list);
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : String(err));
+      setDetailError(desktopErrorMessage(err));
     }
   };
 

@@ -10,6 +10,7 @@ import type {
   MockFailureKind,
   ReminderPreview,
   TipDetail,
+  TipBindingDto,
   TipQuery,
   TipSummary,
   UpdateTipInput,
@@ -237,13 +238,17 @@ function summarize(tip: SeedTip): TipSummary {
 }
 
 function detailOf(tip: SeedTip): TipDetail {
+  const bindings: TipBindingDto[] = tip.bindings.map((binding, index) => ({
+    ...binding,
+    sortOrder: index,
+  }));
   return {
     id: tip.id,
     title: tip.title,
     content: tip.content,
     status: tip.status,
     updatedAt: FIXED_NOW,
-    bindings: tip.bindings.map((b) => ({ ...b })),
+    bindings,
   };
 }
 
@@ -307,6 +312,10 @@ export class MockDesktopApi implements DesktopApi {
       throw new Error("便签正文不能为空");
     }
     const now = new Date().toISOString();
+    const bindings: TipBindingDto[] = input.bindings.map((binding, index) => ({
+      ...binding,
+      sortOrder: index,
+    }));
     const tip: SeedTip = {
       id: `tip-${this.tips.length + 1}`,
       title: input.title?.trim() || firstLine(content),
@@ -315,7 +324,7 @@ export class MockDesktopApi implements DesktopApi {
       bindings: input.bindings.map((b) => ({ ...b })),
     };
     this.tips.unshift({ ...tip, bindings: tip.bindings.map((b) => ({ ...b })) });
-    return { ...detailOf(tip), updatedAt: now };
+    return { ...detailOf(tip), updatedAt: now, bindings };
   }
 
   async updateTip(id: string, input: UpdateTipInput): Promise<TipDetail> {

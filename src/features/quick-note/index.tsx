@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
 import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
-import type { Agent, DesktopApi } from "@/desktop-api/contract";
+import { desktopErrorMessage, type Agent, type DesktopApi } from "@/desktop-api/contract";
 
 export interface QuickNoteWindowProps {
   api: DesktopApi;
@@ -76,7 +76,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
       reset();
       textareaRef.current?.focus();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(desktopErrorMessage(err));
     } finally {
       savingRef.current = false;
       setSaving(false);

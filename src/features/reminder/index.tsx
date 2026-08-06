@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, ExternalLink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import type { DesktopApi, ReminderPreview } from "@/desktop-api/contract";
+import { desktopErrorMessage, type DesktopApi, type ReminderPreview } from "@/desktop-api/contract";
 import { cn } from "@/lib/utils";
 
 const MAX_VISIBLE = 3;
@@ -33,7 +33,7 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
         if (!cancelled) setPreview(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(desktopErrorMessage(err));
       });
     return () => {
       cancelled = true;

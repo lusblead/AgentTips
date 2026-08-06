@@ -8,7 +8,7 @@
 
 **Phase 0（工程基线）已完成**：Tauri 2 + React 19 + TS + Vite + pnpm 工程、Tailwind v4 主题 token、shadcn 风格组件、Rust 四层骨架、架构检查与全量验收脚本。
 
-**Phase 1（Mock 驱动 UI 原型）已完成**，**Phase 1.5（视觉与交互收束）已完成**（2026-08-06）：
+**Phase 1（Mock 驱动 UI 原型）已完成**，**Phase 1.5（视觉与交互收束）已完成**，**Phase 2（真实垂直链路）已完成**（2026-08-06）：
 
 - `DesktopApi` 契约 + `MockDesktopApi`（数据可预测、支持 reset 与模拟失败/延迟）；
 - 快捷新建窗口：每次空白、多 Agent 绑定与独立默认携带开关、`Ctrl+Enter` 保存、防重复提交、失败保留输入；
@@ -18,8 +18,9 @@
 - 浏览器调试入口：`/?window=quick-note|main|reminder|settings`（提醒支持 `&demo=collapsed|empty`，主窗口支持 `&empty=1`、`&agentId=`）；
 - 34 个 Vitest 组件/架构测试 + 17 个 Playwright E2E（交互、截图、布局溢出、控制台无错误）。
 - Phase 1.5：统一中文文案与“提示”称呼；视觉 Token（正文 14px / 辅助 13px / 标题 17px，圆角 7-8-12px，动效 150ms）；主窗口增加新建/设置入口、默认选中第一条、Agent 数量、统一空态；快捷窗口绑定行一体化；提醒窗口轻量列表与折叠动画；设置页区分当前快捷键与录制候选、显示实际检测组合；截图更新至 `artifacts/screenshots/phase-1.5/`。
+- Phase 2：打通 Tip / Agent / 多 Agent 绑定的 React → Tauri → Rust → SQLite 真实垂直链路；Rust 按 domain/application/ports/adapters/commands/bootstrap 分层；SQLite migration + 内置 Agent 幂等种子；事务化创建/修改/删除；`TauriDesktopApi` 生产适配器由 App 组合根选择；结构化错误（`DesktopError`）；62 个 Vitest 测试 + 30 个 Rust 测试 + 21 个 Playwright E2E；WebView2 CDP 自动化验证真实 invoke 链路（创建→读回→修改→删除→重启持久化）。
 
-**尚未实现（后续 Phase）**：SQLite 数据模型、Tauri Command 业务、真实全局快捷键注册、托盘、Agent 检测、15 分钟冷却提醒等。
+**尚未实现（后续 Phase）**：真实全局快捷键注册与设置持久化、多窗口生命周期、托盘、单实例、开机启动、Agent 检测、15 分钟冷却提醒、提醒运行时（`previewHotkey` / `getReminderPreview` 在 Tauri 端明确未实现）。
 
 ## 快速开始
 
@@ -72,14 +73,17 @@ src/
 e2e/                      Playwright 交互 / 截图 / 布局测试
 artifacts/screenshots/phase-1.5/  Phase 1.5 UI 截图
 src-tauri/
-├── src/{domain,application,ports,adapters}/  四层骨架（Phase 2+ 填充）
+├── src/{domain,application,ports,adapters,commands}/  Phase 2 业务实现
+├── migrations/           SQLite migration（0001_init.sql）
 └── capabilities/         最小权限（core:default）
 scripts/                  check-architecture.ps1、acceptance.ps1
+                          vertical-chain-verify.mjs（WebView2 CDP 真实链路验证）
 ```
 
 ## 已知限制
 
-- Phase 1 全部数据来自 MockDesktopApi，重启即重置；`previewHotkey` 只做校验，不持久化；
+- 浏览器模式全部数据来自 MockDesktopApi，重启即重置；Tauri 模式使用 `TauriDesktopApi` + SQLite（`%APPDATA%/com.agenttips.app/agenttips.sqlite3`）；
+- `previewHotkey` / `getReminderPreview` 在 Tauri 端明确未实现，设置页在 Tauri 模式下会提示；
 - 浏览器模式下"关闭"快捷窗口依赖 `window.close()`，被浏览器限制时无效（Tauri 阶段由真实窗口生命周期接管）；
 - 截图与交互测试使用固定 Mock 数据与固定 viewport，无随机时间；
 - Rust 侧保持 Phase 0 骨架，未新增任何业务实现。

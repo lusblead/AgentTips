@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const root = join(__dirname, "..", "..");
 const src = join(root, "src");
+const srcTauri = join(root, "src-tauri");
 const featuresDir = join(src, "features");
 
 function listFiles(dir: string): string[] {
@@ -17,6 +18,10 @@ function listFiles(dir: string): string[] {
     }
   }
   return results;
+}
+
+function listRustFiles(dir: string): string[] {
+  return listFiles(dir).filter((file) => file.endsWith(".rs"));
 }
 
 describe("架构边界（静态检查）", () => {
@@ -70,6 +75,75 @@ describe("架构边界（静态检查）", () => {
         if (pattern.test(content)) {
           violations.push(`${relative(featuresDir, file)} -> features/${other}`);
         }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust domain 不依赖 Tauri / rusqlite / Windows", () => {
+    const domainDir = join(srcTauri, "src", "domain");
+    const violations: string[] = [];
+    for (const file of listRustFiles(domainDir)) {
+      const content = readFileSync(file, "utf8");
+      for (const forbidden of ["tauri::", "rusqlite", "windows::"]) {
+        if (content.includes(forbidden)) {
+          violations.push(`${relative(root, file)} -> ${forbidden}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust application 不依赖 adapters / commands / rusqlite", () => {
+    const appDir = join(srcTauri, "src", "application");
+    const violations: string[] = [];
+    for (const file of listRustFiles(appDir)) {
+      const content = readFileSync(file, "utf8");
+      for (const forbidden of ["crate::adapters", "crate::commands", "rusqlite"]) {
+        if (content.includes(forbidden)) {
+          violations.push(`${relative(root, file)} -> ${forbidden}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("SQL 只存在于 migrations 与 adapters/sqlite.rs", () => {
+    const violations: string[] = [];
+    for (const file of listRustFiles(join(srcTauri, "src"))) {
+      if (file.endsWith(join("adapters", "sqlite.rs"))) continue;
+      const content = readFileSync(file, "utf8");
+      if (/\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b/.test(content)) {
+        violations.push(relative(root, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Tauri commands 不直接引用 rusqlite", () => {
+    const violations: string[] = [];
+    for (const file of listRustFiles(join(srcTauri, "src", "commands"))) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("rusqlite")) {
+        violations.push(relative(root, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("生产 composition root 使用 TauriDesktopApi", () => {
+    const content = readFileSync(join(src, "App.tsx"), "utf8");
+    expect(content).toContain("new TauriDesktopApi()");
+    expect(content).not.toContain("if (window.__TAURI__)");
+  });
+
+  it("feature 组件测试不直接实例化 TauriDesktopApi", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      if (!/\.test\.(ts|tsx)$/.test(file)) continue;
+      const content = readFileSync(file, "utf8");
+      if (content.includes("TauriDesktopApi")) {
+        violations.push(relative(src, file));
       }
     }
     expect(violations).toEqual([]);

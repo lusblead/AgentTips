@@ -3,6 +3,7 @@ import { Keyboard, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { desktopErrorMessage } from "@/desktop-api/contract";
 import type {
   DesktopApi,
   HotkeyBinding,
@@ -109,7 +110,7 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
         }
       } catch (err) {
         setState("error");
-        setFeedback(err instanceof Error ? err.message : String(err));
+        setFeedback(desktopErrorMessage(err));
       } finally {
         setPending(false);
       }
@@ -243,7 +244,7 @@ export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps)
         if (!cancelled) setHotkey(settings.hotkey);
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setLoadError(desktopErrorMessage(err));
       });
     return () => {
       cancelled = true;

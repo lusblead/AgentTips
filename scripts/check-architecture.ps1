@@ -48,6 +48,57 @@ foreach ($file in $featureFiles) {
     }
 }
 
+# 5. Rust application 层不依赖 adapters 或 commands（application → domain + ports）
+$applicationFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\application") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+foreach ($file in $applicationFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    foreach ($forbidden in @("crate::adapters", "crate::commands", "rusqlite")) {
+        if ($content -match [regex]::Escape($forbidden)) {
+            $failures += "application 违反依赖边界: $($file.FullName) 包含 $forbidden"
+        }
+    }
+}
+
+# 6. SQL 只能出现在 migrations/*.sql 与 adapters/sqlite.rs
+$rustFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src") -Recurse -Filter *.rs
+foreach ($file in $rustFiles) {
+    if ($file.FullName -match 'adapters\\sqlite\.rs$') { continue }
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -cmatch '\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b') {
+        $failures += "SQL 出现在非 SQLite adapter 文件: $($file.FullName)"
+    }
+}
+
+# 7. Tauri commands 不直接引用 rusqlite
+$commandFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\commands") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+foreach ($file in $commandFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'rusqlite') {
+        $failures += "command 直接引用 rusqlite: $($file.FullName)"
+    }
+}
+
+# 8. 生产 composition root（src/App.tsx）必须在 Tauri 分支实例化 TauriDesktopApi
+$appEntry = Join-Path $root "src\App.tsx"
+if (Test-Path $appEntry) {
+    $content = Get-Content -Raw -Encoding UTF8 $appEntry
+    if ($content -notmatch 'new TauriDesktopApi\(\)') {
+        $failures += "App.tsx 未实例化 TauriDesktopApi（生产适配器缺失）"
+    }
+    if ($content -match 'if \(window\.__TAURI__\)') {
+        $failures += "App.tsx 使用被禁止的 window.__TAURI__ 分支"
+    }
+}
+
+# 9. feature 组件测试不得直接实例化 TauriDesktopApi
+$featureTests = Get-ChildItem -Path (Join-Path $root "src\features") -Recurse -Include *.test.ts, *.test.tsx -ErrorAction SilentlyContinue
+foreach ($file in $featureTests) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'TauriDesktopApi') {
+        $failures += "feature 测试直接引用 TauriDesktopApi（应注入 mock adapter）: $($file.FullName)"
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "check-architecture: FAIL"
     $failures | ForEach-Object { Write-Host "  - $_" }

@@ -1,0 +1,8 @@
+dist
+node_modules
+src-tauri/target
+src-tauri/gen
+playwright-report
+test-results
+scripts
+src/schemas/hotkey-keys.generated.ts

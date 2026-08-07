@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use rand::seq::SliceRandom;
 use uuid::Uuid;
 
+use crate::domain::color::{NoteColorKey, ALL_NOTE_COLORS};
 use crate::domain::tips::{
     normalized_title, CreateTipCommand, Tip, TipBinding, TipQuery, UpdateTipCommand,
+    UpdateTipTextCommand,
 };
 use crate::error::{AppError, AppResult};
 use crate::ports::clock::Clock;
@@ -30,6 +33,11 @@ impl TipService {
         command.validate()?;
         let now = self.clock.now_utc();
         let id = self.ids.new_id();
+        // 调用方未提供颜色时，按同一颜色分配规则兜底（排除最近 2 种颜色）。
+        let color_key = match command.color_key {
+            Some(key) => key,
+            None => self.suggest_color()?,
+        };
         let bindings: Vec<TipBinding> = command
             .bindings
             .iter()
@@ -48,9 +56,53 @@ impl TipService {
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            color_key,
+            used_at: None,
             bindings: bindings.clone(),
         };
         self.repo.create_with_bindings(&tip, &bindings)
+    }
+
+    /// 颜色建议：排除最近创建的 2 张 Tip 的颜色后随机选择。
+    pub fn suggest_color(&self) -> AppResult<NoteColorKey> {
+        let recent = self.repo.recent_color_keys(2)?;
+        let excluded: std::collections::HashSet<NoteColorKey> = recent.into_iter().collect();
+        let pool: Vec<NoteColorKey> = ALL_NOTE_COLORS
+            .iter()
+            .copied()
+            .filter(|key| !excluded.contains(key))
+            .collect();
+        let candidates = if pool.is_empty() {
+            ALL_NOTE_COLORS.to_vec()
+        } else {
+            pool
+        };
+        let mut rng = rand::thread_rng();
+        Ok(*candidates.choose(&mut rng).unwrap_or(&NoteColorKey::Lemon))
+    }
+
+    /// Text-only 更新：只允许修改 title/content/updated_at。
+    pub fn update_text(&self, command: UpdateTipTextCommand) -> AppResult<Tip> {
+        command.validate()?;
+        let updated_at = self.clock.now_utc();
+        self.repo.update_text(
+            command.id,
+            command.title.trim(),
+            command.content.trim(),
+            updated_at,
+        )
+    }
+
+    pub fn mark_used(&self, id: Uuid) -> AppResult<Tip> {
+        self.repo.mark_used(id, self.clock.now_utc())
+    }
+
+    pub fn restore_used(&self, id: Uuid) -> AppResult<Tip> {
+        self.repo.restore_used(id)
+    }
+
+    pub fn update_color(&self, id: Uuid, color_key: NoteColorKey) -> AppResult<Tip> {
+        self.repo.update_color(id, color_key)
     }
 
     pub fn get(&self, id: Uuid) -> AppResult<Option<Tip>> {
@@ -103,6 +155,7 @@ impl TipService {
 mod tests {
     use super::*;
     use crate::domain::agents::AgentKind;
+    use crate::domain::color::NoteColorKey;
     use crate::domain::tips::{CreateBindingInput, TipStatus};
     use chrono::{TimeZone, Utc};
     use std::sync::Mutex;
@@ -169,6 +222,32 @@ mod tests {
             }
             Ok(())
         }
+
+        fn recent_color_keys(&self, _limit: usize) -> AppResult<Vec<NoteColorKey>> {
+            Ok(vec![])
+        }
+
+        fn update_text(
+            &self,
+            _id: Uuid,
+            _title: &str,
+            _content: &str,
+            _updated_at: chrono::DateTime<chrono::Utc>,
+        ) -> AppResult<Tip> {
+            unreachable!()
+        }
+
+        fn mark_used(&self, _id: Uuid, _used_at: chrono::DateTime<chrono::Utc>) -> AppResult<Tip> {
+            unreachable!()
+        }
+
+        fn restore_used(&self, _id: Uuid) -> AppResult<Tip> {
+            unreachable!()
+        }
+
+        fn update_color(&self, _id: Uuid, _color_key: NoteColorKey) -> AppResult<Tip> {
+            unreachable!()
+        }
     }
 
     #[derive(Default)]
@@ -216,6 +295,7 @@ mod tests {
             title: Some("标题".into()),
             content: content.into(),
             status: TipStatus::Active,
+            color_key: Some(NoteColorKey::Mint),
             bindings: vec![CreateBindingInput {
                 agent_id: agent,
                 auto_attach,

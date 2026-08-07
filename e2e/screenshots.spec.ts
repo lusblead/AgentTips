@@ -66,7 +66,7 @@ test.describe("Phase 1.5 视觉截图", () => {
   test("主窗口：有数据（便签墙）", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main");
-    await expect(page.getByText("修改前解释调用链")).toBeVisible();
+    await expect(page.getByLabel("标题").first()).toHaveValue("修改前解释调用链");
     await expect(page.getByTestId("tip-grid")).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "main-window.png") });
     expect(errors).toEqual([]);
@@ -160,6 +160,35 @@ test.describe("Phase 2.2 补充截图（浏览器 Mock）", () => {
     await page.goto("/?window=reminder&demo=collapsed");
     await expect(page.getByText("Cursor · 3 条提示")).toBeVisible();
     await page.screenshot({ path: join(PHASE22, "reminder-collapsed.png") });
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("Phase 2.4 补充截图（浏览器 Mock）", () => {
+  const PHASE24 = join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.4");
+
+  test("已使用便签空态", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.setViewportSize({ width: 1000, height: 750 });
+    await page.goto("/?window=main");
+    await expect(page.getByTestId("tip-card").first()).toBeVisible();
+    await page.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: "已使用便签" }).click();
+    await expect(page.getByRole("heading", { name: "已使用" })).toBeVisible();
+    const usedCard = page.getByTestId("tip-card").first();
+    await expect(usedCard).toBeVisible();
+    await usedCard.getByRole("button", { name: "恢复到首页" }).click();
+    // 恢复后自动回首页；重新进入 Used View 截空态
+    await expect(page.getByRole("heading", { name: "AgentTips" })).toBeVisible();
+    await page.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: "已使用便签" }).click();
+    await expect(page.getByRole("heading", { name: "已使用" })).toBeVisible();
+    await expect(page.getByText("还没有已使用的便签")).toBeVisible();
+    await page.screenshot({ path: join(PHASE24, "used-notes-empty.png") });
     expect(errors).toEqual([]);
   });
 });

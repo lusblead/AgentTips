@@ -8,6 +8,17 @@
 
 export type AgentKind = "desktop" | "terminal";
 export type TipStatus = "active" | "archived";
+export type NoteColorKey =
+  | "lemon"
+  | "apricot"
+  | "coral"
+  | "rose"
+  | "lavender"
+  | "periwinkle"
+  | "sky"
+  | "aqua"
+  | "mint"
+  | "sage";
 
 /** 便签与 Agent 的绑定关系（输入用）；默认携带属于该关系，不属于便签全局属性。 */
 export interface AgentBinding {
@@ -26,6 +37,8 @@ export interface TipSummary {
   content: string;
   status: TipStatus;
   updatedAt: string;
+  colorKey: NoteColorKey;
+  usedAt: string | null;
   agentIds: string[];
 }
 
@@ -35,12 +48,15 @@ export interface TipDetail {
   content: string;
   status: TipStatus;
   updatedAt: string;
+  colorKey: NoteColorKey;
+  usedAt: string | null;
   bindings: TipBindingDto[];
 }
 
 export interface CreateTipInput {
   title?: string;
   content: string;
+  colorKey?: NoteColorKey;
   status?: "draft" | "active";
   bindings: AgentBinding[];
 }
@@ -54,6 +70,8 @@ export interface UpdateTipInput {
 export interface TipQuery {
   agentId?: string;
   search?: string;
+  /** true=仅已使用；false/缺省=仅未使用（首页默认）。 */
+  used?: boolean;
 }
 
 export interface Agent {
@@ -148,6 +166,13 @@ export interface DesktopApi {
   createTip(input: CreateTipInput): Promise<TipDetail>;
   updateTip(id: string, input: UpdateTipInput): Promise<TipDetail>;
   deleteTip(id: string): Promise<void>;
+  /** 创建时颜色建议（排除最近 2 种颜色）。 */
+  suggestNoteColor(): Promise<NoteColorKey>;
+  /** Text-only 更新：只改标题/正文，不影响 bindings/color/usedAt/status。 */
+  updateTipText(id: string, title: string, content: string): Promise<TipDetail>;
+  markTipUsed(id: string): Promise<TipDetail>;
+  restoreTipUsed(id: string): Promise<TipDetail>;
+  updateTipColor(id: string, colorKey: NoteColorKey): Promise<TipDetail>;
 
   listAgents(): Promise<Agent[]>;
   getSettings(): Promise<AppSettings>;

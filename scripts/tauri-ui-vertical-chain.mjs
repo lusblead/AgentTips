@@ -317,7 +317,7 @@ async function setInput(client, ariaLabel, text) {
 
 async function setDetailTextarea(client, text) {
   await client.evaluate(`(() => {
-    const el = document.querySelector('textarea[aria-label="正文"]');
+    const el = document.querySelector('[role="dialog"] textarea[aria-label="正文"]');
     if (!el) throw new Error('未找到详情正文');
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     setter.call(el, ${JSON.stringify(text)});
@@ -326,7 +326,9 @@ async function setDetailTextarea(client, text) {
 }
 
 async function detailContent(client) {
-  return client.evaluate(`document.querySelector('textarea[aria-label="正文"]')?.value ?? null`);
+  return client.evaluate(
+    `document.querySelector('[role="dialog"] textarea[aria-label="正文"]')?.value ?? null`,
+  );
 }
 
 async function clickButton(client, text) {
@@ -379,6 +381,19 @@ async function clickByLabel(client, label) {
   if (!ok) {
     throw new Error(`未找到 aria-label: ${label}`);
   }
+}
+
+async function clickByAria(client, label) {
+  const ok = await client.evaluate(`(() => {
+    const el = document.querySelector('[aria-label=${JSON.stringify(label)}]');
+    if (!el) return false;
+    el.click();
+    return true;
+  })()`);
+  if (!ok) {
+    throw new Error(`未找到 aria-label: ${label}`);
+  }
+  await sleep(150);
 }
 
 async function pickAgent(client, agentName) {
@@ -454,29 +469,33 @@ async function openTipByTitle(client, title) {
   }
   await setInput(client, "搜索便签", title);
   await client.waitForExpression(
-    `[...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].some((b) => (b.textContent ?? '').includes(${JSON.stringify(title)}))`,
+    `[...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].some((b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(title)})`,
     `卡片 ${title}`,
   );
   const ok = await client.evaluate(`(() => {
     const cards = [...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')];
-    const target = cards.find((b) => (b.textContent ?? '').includes(${JSON.stringify(title)}));
+    const target = cards.find(
+      (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(title)},
+    );
     if (!target) return false;
-    target.click();
+    const expand = target.querySelector('button[aria-label="展开详情"]');
+    if (!expand) return false;
+    expand.click();
     return true;
   })()`);
   if (!ok) {
-    throw new Error(`点击卡片失败: ${title}`);
+    throw new Error(`展开卡片失败: ${title}`);
   }
   try {
     await client.waitForExpression(
-      `document.querySelector('[aria-label="标题"]') !== null`,
+      `document.querySelector('[role="dialog"] input[aria-label="标题"]') !== null`,
       "详情打开",
       5_000,
     );
   } catch (error) {
     const diag = await client.evaluate(
       `JSON.stringify({
-        cards: [...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].map((b) => b.textContent.slice(0, 30)),
+        cards: [...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].map((b) => b.querySelector('input[aria-label="标题"]')?.value ?? ''),
         labels: [...document.querySelectorAll('input')].map((i) => i.getAttribute('aria-label')),
         body: document.body.textContent.slice(0, 150),
       })`,
@@ -550,6 +569,158 @@ async function run() {
     console.log("read back via UI ok ✓ (autoAttach 独立: cursor=true, claude=false)");
     assertNoConsoleErrors(client, "create+read");
 
+    // ---- Living Notes：首页 inline 修改 → autosave → reload 验证 ----
+    await client.switchRoute("main");
+    await client.waitWindow("main");
+    const searchVisible = await client.evaluate(
+      `Boolean(document.querySelector('[aria-label="搜索"]'))`,
+    );
+    if (searchVisible) {
+      await clickByAria(client, "搜索");
+    }
+    await setInput(client, "搜索便签", uniqueTitle);
+    await client.waitForExpression(
+      `[...document.querySelectorAll('[data-testid="tip-card"]')].some((b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)})`,
+      `卡片 ${uniqueTitle}`,
+    );
+    const inlineEdit = await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      if (!card) return false;
+      const ta = card.querySelector('textarea[aria-label="正文"]');
+      if (!ta) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, ${JSON.stringify(updatedContent)});
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    if (!inlineEdit) throw new Error("首页 inline 修改失败");
+    // 等 autosave（650ms debounce + 往返）
+    await client.waitForExpression(
+      `(async () => {
+        const list = await window.__TAURI_INTERNALS__.invoke('tip_list', { query: { search: ${JSON.stringify(
+          uniqueTitle,
+        )} } });
+        return list.some((t) => t.content === ${JSON.stringify(updatedContent)});
+      })()`,
+      "inline autosave 持久化",
+      8_000,
+    );
+    console.log("inline edit + autosave via UI ok ✓");
+
+    // ---- 首页输入大量文字 → 卡片变高（真实浏览器） ----
+    await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      if (!card) return;
+      const ta = card.querySelector('textarea[aria-label="正文"]');
+      const longText = Array.from({ length: 15 }, (_, i) => '第 ' + (i + 1) + ' 行内容').join('\\n');
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, longText);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await sleep(900);
+    const growInfo = await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      if (!card) return null;
+      const ta = card.querySelector('textarea[aria-label="正文"]');
+      return {
+        cardH: Math.round(card.getBoundingClientRect().height),
+        taH: Math.round(ta.getBoundingClientRect().height),
+        taScroll: ta.scrollHeight,
+        w: Math.round(card.getBoundingClientRect().width),
+      };
+    })()`);
+    if (!growInfo || growInfo.taH < 80 || growInfo.taScroll > growInfo.taH + 2) {
+      throw new Error(`卡片未自适应增长: ${JSON.stringify(growInfo)}`);
+    }
+    console.log("auto-grow via UI ok ✓", JSON.stringify(growInfo));
+
+    // ---- 首页直接输入额外内容并验证 autosave 失败保留（利用 error path 单独覆盖） ----
+    // ---- Mark Used → 首页消失 ----
+    const colorBefore = await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      return card?.getAttribute('data-color') ?? null;
+    })()`);
+    await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      card?.querySelector('button[aria-label="标记已使用"]')?.click();
+    })()`);
+    await client.waitForExpression(
+      `document.body.textContent.includes("已移至「已使用」")`,
+      "已使用 Toast",
+    );
+    await client.waitForExpression(
+      `![...document.querySelectorAll('[data-testid="tip-card"]')].some((b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)})`,
+      "首页移除",
+    );
+    console.log("mark used via UI ok ✓");
+
+    // ---- Used View：找到同色 Tip → Restore ----
+    await sleep(400);
+    const clicked = await client.evaluate(`(() => {
+      const el = document.querySelector('[aria-label="更多操作"]');
+      if (!el) return false;
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      el.click();
+      return true;
+    })()`);
+    if (!clicked) throw new Error("更多操作按钮不存在");
+    await sleep(400);
+    await client.waitForExpression(
+      `[...document.querySelectorAll('[role="menuitem"]')].some((el) => (el.textContent ?? '').includes('已使用便签'))`,
+      "已使用菜单项",
+    );
+    await client.evaluate(`(() => {
+      const items = [...document.querySelectorAll('[role="menuitem"]')];
+      items.find((el) => (el.textContent ?? '').includes('已使用便签'))?.click();
+    })()`);
+    await client.waitForExpression(
+      `document.body.textContent.includes("已使用") && [...document.querySelectorAll('[data-testid="tip-card"]')].some((b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)})`,
+      "Used View 显示该 Tip",
+    );
+    const colorInUsed = await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      return card?.getAttribute('data-color') ?? null;
+    })()`);
+    if (colorBefore !== colorInUsed) {
+      throw new Error(`Used View 颜色变化: ${colorBefore} -> ${colorInUsed}`);
+    }
+    console.log("used view color preserved ✓");
+    await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      card?.querySelector('button[aria-label="恢复到首页"]')?.click();
+    })()`);
+    await client.waitForExpression(
+      `document.body.textContent.includes("AgentTips") && !document.body.textContent.includes("还没有便签")`,
+      "restore 回首页",
+    );
+    const restoreDiag = await client.evaluate(`(() => {
+      const list = window.__TAURI_INTERNALS__.invoke('tip_list', { query: { search: ${JSON.stringify(
+        uniqueTitle,
+      )} } });
+      return list;
+    })()`);
+    const restored =
+      Array.isArray(restoreDiag) &&
+      restoreDiag.some(
+        (t) => t.title === uniqueTitle && (t.usedAt === null || t.usedAt === undefined),
+      );
+    if (!restored) throw new Error("Restore 后 usedAt 未清空");
+    console.log("restore via UI ok ✓ (color 不变, usedAt 清空)");
+
     // ---- 重启持久化 ----
     client.close();
     stopApp();
@@ -563,34 +734,34 @@ async function run() {
     await assertAdapter(client);
     await client.switchRoute("main");
     await client.waitWindow("main");
-    await openTipByTitle(client, uniqueTitle);
-    const content2 = await detailContent(client);
-    if (content2 !== uniqueTitle) {
-      throw new Error(`重启后正文丢失: ${content2}`);
-    }
-    console.log("restart persistence via UI ok ✓");
-
-    // ---- UI 修改正文 + 替换绑定 ----
-    await setDetailTextarea(client, updatedContent);
-    await clickByLabel(client, "移除 Claude Code");
-    await setSwitch(client, "Cursor 默认携带", false);
-    await clickButton(client, "保存修改");
+    await clickByAria(client, "搜索");
+    await setInput(client, "搜索便签", uniqueTitle);
     await client.waitForExpression(
-      `document.body.textContent.includes("已保存")`,
-      "修改保存反馈",
+      `[...document.querySelectorAll('[data-testid="tip-card"]')].some((b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)})`,
+      `重启后卡片 ${uniqueTitle}`,
     );
-    await client.switchRoute("main");
-    await client.waitWindow("main");
-    await openTipByTitle(client, updatedContent);
-    const content3 = await detailContent(client);
-    const cursor3 = await switchValue(client, "Cursor 默认携带");
-    const hasClaude = await client.evaluate(`Boolean(document.querySelector('[aria-label="Claude Code 默认携带"]'))`);
-    if (content3 !== updatedContent || cursor3 !== "false" || hasClaude) {
-      throw new Error(`修改验证失败 content=${content3} cursor=${cursor3} claudeRemoved=${!hasClaude}`);
+    const colorAfterRestart = await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="tip-card"]')].find(
+        (b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(uniqueTitle)},
+      );
+      return card?.getAttribute('data-color') ?? null;
+    })()`);
+    if (colorAfterRestart !== colorBefore) {
+      throw new Error(`重启后颜色变化: ${colorBefore} -> ${colorAfterRestart}`);
     }
-    console.log("update via UI ok ✓ (正文已改、绑定替换为仅 Cursor、autoAttach=false)");
+    await openTipByTitle(client, uniqueTitle);
+    await client.waitForExpression(
+      `(document.querySelector('[role="dialog"] textarea[aria-label="正文"]')?.value ?? '').includes('第 15 行内容')`,
+      "editor 加载完整正文",
+      5_000,
+    );
+    const content2 = await detailContent(client);
+    if (!content2?.includes("第 15 行内容")) {
+      throw new Error(`重启后正文未持久化: ${content2?.slice(0, 40)}`);
+    }
+    console.log("restart persistence + color stable via UI ok ✓ (15 行正文保留)");
 
-    // ---- UI 删除（overflow menu）----
+    // ---- UI 删除（overflow menu，Editor 仍打开）----
     await realClick(client, '[role="dialog"] [aria-label="更多操作"]');
     await client.waitForExpression(
       `[...document.querySelectorAll('[role="menuitem"]')].some((el) => (el.textContent ?? '').includes('删除'))`,
@@ -620,14 +791,6 @@ async function run() {
       throw new Error("未找到删除确认按钮");
     }
     await sleep(600);
-    const deleteDiag = await client.evaluate(`JSON.stringify({
-      href: location.href,
-      len: document.body.textContent.length,
-      head: document.body.textContent.slice(0, 200),
-      ready: document.readyState,
-    })`);
-    console.log("DELETE_DIAG:", deleteDiag);
-    console.log("DELETE_ERRORS:", JSON.stringify(client.errors.slice(-5)));
     await client.waitForExpression(
       `document.body.textContent.includes("还没有便签")`,
       "删除后空态",

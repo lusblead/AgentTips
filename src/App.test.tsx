@@ -10,7 +10,7 @@ describe("窗口路由", () => {
     visit("/");
     render(<App />);
     expect(await screen.findByText("AgentTips")).toBeInTheDocument();
-    expect(screen.getByText("修改前解释调用链")).toBeInTheDocument();
+    expect(await screen.findAllByTestId("tip-card")).not.toHaveLength(0);
   });
 
   it("?window=quick-note 进入快捷新建窗口", () => {

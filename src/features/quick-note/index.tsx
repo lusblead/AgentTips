@@ -6,8 +6,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
 import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
 import { cn } from "@/lib/utils";
+import { noteColorClass } from "@/lib/palette";
 import { desktopErrorMessage } from "@/desktop-api/contract";
-import type { Agent, DesktopApi } from "@/desktop-api/contract";
+import type { Agent, DesktopApi, NoteColorKey } from "@/desktop-api/contract";
 
 export interface QuickNoteWindowProps {
   api: DesktopApi;
@@ -35,6 +36,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
   const [error, setError] = useState<string | null>(null);
   const [showTitle, setShowTitle] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [draftColor, setDraftColor] = useState<NoteColorKey | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const savingRef = useRef(false);
 
@@ -49,8 +51,20 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
   }, [api]);
 
   useEffect(() => {
+    let cancelled = false;
+    api
+      .suggestNoteColor()
+      .then((color) => {
+        if (!cancelled) setDraftColor(color);
+      })
+      .catch(() => {
+        if (!cancelled) setDraftColor("lemon");
+      });
     textareaRef.current?.focus();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   const reset = useCallback(() => {
     setTitle("");
@@ -59,7 +73,12 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
     setShowTitle(false);
     setError(null);
     setSubmitAttempted(false);
-  }, []);
+    setDraftColor(null);
+    void api
+      .suggestNoteColor()
+      .then(setDraftColor)
+      .catch(() => setDraftColor("lemon"));
+  }, [api]);
 
   const canSave = content.trim().length > 0 && bindings.length > 0;
   const noAgentHint = !submitAttempted && content.trim().length > 0 && bindings.length === 0;
@@ -77,6 +96,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
       await api.createTip({
         title: title.trim() || undefined,
         content: trimmed,
+        colorKey: draftColor ?? undefined,
         bindings: bindings.map((b) => ({ agentId: b.agentId, autoAttach: b.autoAttach })),
       });
       setSaved(true);
@@ -89,7 +109,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
       savingRef.current = false;
       setSaving(false);
     }
-  }, [api, bindings, content, reset, title]);
+  }, [api, bindings, content, draftColor, reset, title]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -109,8 +129,9 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-pastel-butter text-text-primary"
+      className="flex h-screen flex-col overflow-hidden bg-surface-canvas text-text-primary"
       data-window="quick-note"
+      data-testid="quick-note-shell"
     >
       <div className="flex shrink-0 items-center justify-between px-4 py-2">
         <h1 className="text-page-title font-semibold tracking-tight">新建提示</h1>
@@ -127,79 +148,89 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col px-4 py-1">
-        {showTitle ? (
-          <Input
-            aria-label="标题"
-            placeholder="标题（可选）"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            className="mb-2 border-transparent bg-transparent px-1 text-page-title font-medium placeholder:text-text-disabled focus-visible:border-accent-ring focus-visible:bg-surface-primary"
-          />
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="mb-1 w-fit px-1 text-secondary-size text-text-muted underline decoration-dotted underline-offset-4 hover:bg-transparent hover:text-text-primary"
-            onClick={() => setShowTitle(true)}
-          >
-            添加标题
-          </Button>
-        )}
-
-        <Textarea
-          ref={textareaRef}
-          aria-label="正文"
-          placeholder="写下要提醒自己的内容……"
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          rows={6}
-          className="min-h-0 flex-1 resize-none rounded-lg border-border-subtle bg-surface-primary px-3 py-2 text-body leading-relaxed focus-visible:border-accent-ring focus-visible:shadow-[0_0_0_3px_var(--accent-ring)]"
-        />
-
-        <div className="shrink-0 py-2">
-          {bindings.length > 0 && (
-            <div className="mb-1.5 flex max-h-28 flex-col gap-0.5 overflow-y-auto">
-              {bindings.map((binding) => {
-                const agent = agents.find((a) => a.id === binding.agentId);
-                if (!agent) return null;
-                return (
-                  <AgentBindingRow
-                    key={binding.agentId}
-                    agentName={agent.name}
-                    checked={binding.autoAttach}
-                    disabled={saving}
-                    onCheckedChange={(autoAttach) =>
-                      setBindings((current) =>
-                        current.map((b) =>
-                          b.agentId === binding.agentId ? { ...b, autoAttach } : b,
-                        ),
-                      )
-                    }
-                    onRemove={() =>
-                      setBindings((current) => current.filter((b) => b.agentId !== binding.agentId))
-                    }
-                  />
-                );
-              })}
-            </div>
+      <div className="flex min-h-0 flex-1 px-5 pb-4">
+        <div
+          className={`flex min-h-0 flex-1 flex-col rounded-[var(--radius-note)] p-4 shadow-[var(--note-shadow)] transition-shadow duration-[150ms] ${
+            draftColor ? noteColorClass(draftColor) : "bg-surface-primary"
+          } text-note-text-primary`}
+          data-testid="note-surface"
+          data-color={draftColor ?? undefined}
+        >
+          {showTitle ? (
+            <Input
+              aria-label="标题"
+              placeholder="标题（可选）"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className="mb-2 border-transparent bg-transparent px-1 text-page-title font-medium text-note-text-primary placeholder:text-note-text-secondary focus-visible:border-accent-ring"
+            />
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mb-1 w-fit px-1 text-secondary-size text-text-muted underline decoration-dotted underline-offset-4 hover:bg-transparent hover:text-text-primary"
+              onClick={() => setShowTitle(true)}
+            >
+              添加标题
+            </Button>
           )}
-          <AgentMultiSelect
-            agents={agents}
-            selectedIds={bindings.map((b) => b.agentId)}
-            onChange={(ids) => {
-              setBindings((current) => {
-                const existing = new Map(current.map((b) => [b.agentId, b]));
-                return ids.map((id) => existing.get(id) ?? { agentId: id, autoAttach: true });
-              });
-              // 选择后焦点回到正文，避免快捷键被菜单 trigger 捕获
-              textareaRef.current?.focus();
-            }}
-            disabled={saving}
-            showSelected={false}
-            onMenuClosed={() => textareaRef.current?.focus()}
+
+          <Textarea
+            ref={textareaRef}
+            aria-label="正文"
+            placeholder="写下要提醒自己的内容……"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            rows={6}
+            className="min-h-0 flex-1 resize-none rounded-lg border-transparent bg-transparent px-2 py-1 text-body leading-relaxed text-note-text-primary placeholder:text-note-text-secondary focus-visible:border-accent-ring"
           />
+
+          <div className="shrink-0 py-1">
+            {bindings.length > 0 && (
+              <div className="mb-1.5 flex max-h-28 flex-col gap-0.5 overflow-y-auto">
+                {bindings.map((binding) => {
+                  const agent = agents.find((a) => a.id === binding.agentId);
+                  if (!agent) return null;
+                  return (
+                    <AgentBindingRow
+                      key={binding.agentId}
+                      agentName={agent.name}
+                      checked={binding.autoAttach}
+                      disabled={saving}
+                      onCheckedChange={(autoAttach) =>
+                        setBindings((current) =>
+                          current.map((b) =>
+                            b.agentId === binding.agentId ? { ...b, autoAttach } : b,
+                          ),
+                        )
+                      }
+                      onRemove={() =>
+                        setBindings((current) =>
+                          current.filter((b) => b.agentId !== binding.agentId),
+                        )
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <AgentMultiSelect
+              agents={agents}
+              selectedIds={bindings.map((b) => b.agentId)}
+              onChange={(ids) => {
+                setBindings((current) => {
+                  const existing = new Map(current.map((b) => [b.agentId, b]));
+                  return ids.map((id) => existing.get(id) ?? { agentId: id, autoAttach: true });
+                });
+                // 选择后焦点回到正文，避免快捷键被菜单 trigger 捕获
+                textareaRef.current?.focus();
+              }}
+              disabled={saving}
+              showSelected={false}
+              onMenuClosed={() => textareaRef.current?.focus()}
+            />
+          </div>
         </div>
       </div>
 

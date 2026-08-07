@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import QuickNoteWindow from ".";
 import NoteLibraryWindow from "@/features/note-library";
@@ -23,9 +23,16 @@ describe("Tip 创建链路（adapter 注入）", () => {
     quick.unmount();
 
     const library = render(<NoteLibraryWindow api={api} />);
-    expect((await screen.findAllByText("垂直链路新增提示")).length).toBeGreaterThanOrEqual(1);
-    await user.click(screen.getAllByTestId("tip-card")[0]);
-    expect(await screen.findByLabelText("标题")).toHaveValue("垂直链路新增提示");
+    const cards = await screen.findAllByTestId("tip-card");
+    const target = cards.find(
+      (card) =>
+        card.querySelector('input[aria-label="标题"]')?.getAttribute("value") ===
+        "垂直链路新增提示",
+    );
+    expect(target).toBeDefined();
+    await user.click(target!.querySelector('button[aria-label="展开详情"]')!);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("标题")).toHaveValue("垂直链路新增提示");
     library.unmount();
   });
 

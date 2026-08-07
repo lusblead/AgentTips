@@ -17,7 +17,10 @@ use adapters::sqlite::SqliteDatabase;
 use application::agents::AgentService;
 use application::tips::TipService;
 use commands::agents::agent_list;
-use commands::tips::{tip_create, tip_delete, tip_get, tip_list, tip_update};
+use commands::tips::{
+    note_color_suggest, tip_create, tip_delete, tip_get, tip_list, tip_mark_used, tip_restore_used,
+    tip_update, tip_update_color, tip_update_text,
+};
 
 /// 应用共享状态（composition root 装配）。
 pub struct AppState {
@@ -46,7 +49,17 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            tip_create, tip_get, tip_list, tip_update, tip_delete, agent_list
+            tip_create,
+            tip_get,
+            tip_list,
+            tip_update,
+            tip_delete,
+            note_color_suggest,
+            tip_update_text,
+            tip_mark_used,
+            tip_restore_used,
+            tip_update_color,
+            agent_list
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

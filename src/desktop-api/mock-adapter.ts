@@ -8,6 +8,7 @@ import type {
   HotkeyCandidate,
   HotkeyPreviewResult,
   MockFailureKind,
+  NoteColorKey,
   ReminderPreview,
   TipDetail,
   TipBindingDto,
@@ -167,10 +168,48 @@ interface SeedTip {
   title: string;
   content: string;
   status: "active" | "archived";
+  colorKey: NoteColorKey;
+  usedAt: string | null;
+  updatedAt: string;
   bindings: AgentBinding[];
 }
 
-const SEED_TIPS: SeedTip[] = [
+const SEED_COLORS: NoteColorKey[] = [
+  "lemon",
+  "apricot",
+  "coral",
+  "rose",
+  "lavender",
+  "periwinkle",
+  "sky",
+  "aqua",
+  "mint",
+  "sage",
+];
+
+const SEED_USED_TIP: SeedTip = {
+  id: "tip-used-1",
+  title: "已使用的示例",
+  content: "这条便签已经完成使命，收进「已使用」盒子。",
+  status: "active",
+  colorKey: "sage",
+  usedAt: "2026-08-06T13:00:00.000Z",
+  updatedAt: FIXED_NOW,
+  bindings: [{ agentId: AGENT_IDS.codex, autoAttach: true }],
+};
+
+type SeedTipBase = Omit<SeedTip, "colorKey" | "usedAt" | "updatedAt">;
+
+function seedColorFor(id: string): NoteColorKey {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return SEED_COLORS[(hash >>> 0) % SEED_COLORS.length];
+}
+
+const SEED_TIPS: SeedTipBase[] = [
   {
     id: "tip-1",
     title: "修改前解释调用链",
@@ -275,6 +314,10 @@ const SEED_TIPS: SeedTip[] = [
   },
 ];
 
+function withSeedMeta(tip: SeedTipBase): SeedTip {
+  return { ...tip, colorKey: seedColorFor(tip.id), usedAt: null, updatedAt: FIXED_NOW };
+}
+
 const SEED_SETTINGS: AppSettings = {
   theme: "system",
   globalPause: false,
@@ -297,6 +340,8 @@ function summarize(tip: SeedTip): TipSummary {
     content: tip.content,
     status: tip.status,
     updatedAt: FIXED_NOW,
+    colorKey: tip.colorKey,
+    usedAt: tip.usedAt,
     agentIds: tip.bindings.map((b) => b.agentId),
   };
 }
@@ -312,6 +357,8 @@ function detailOf(tip: SeedTip): TipDetail {
     content: tip.content,
     status: tip.status,
     updatedAt: FIXED_NOW,
+    colorKey: tip.colorKey,
+    usedAt: tip.usedAt,
     bindings,
   };
 }
@@ -328,12 +375,15 @@ export class MockDesktopApi implements DesktopApi {
   private failures: Record<MockFailureKind, boolean> = { save: false, delete: false };
   private saveDelayMs = 0;
 
-  constructor(options?: { withSeed?: boolean }) {
+  constructor(options?: { withSeed?: boolean; withUsedTip?: boolean }) {
     this.agents = SEED_AGENTS.map((agent) => ({ ...agent }));
     this.tips = (options?.withSeed === false ? [] : SEED_TIPS).map((tip) => ({
-      ...tip,
+      ...withSeedMeta(tip),
       bindings: tip.bindings.map((b) => ({ ...b })),
     }));
+    if (options?.withSeed !== false && options?.withUsedTip !== false) {
+      this.tips.push({ ...SEED_USED_TIP, bindings: SEED_USED_TIP.bindings.map((b) => ({ ...b })) });
+    }
     this.settings = {
       ...SEED_SETTINGS,
       hotkey: { ...SEED_SETTINGS.hotkey },
@@ -346,6 +396,8 @@ export class MockDesktopApi implements DesktopApi {
 
   async listTips(query?: TipQuery): Promise<TipSummary[]> {
     let items = this.tips.map((tip) => summarize(tip));
+    const used = query?.used ?? false;
+    items = items.filter((tip) => (used ? tip.usedAt !== null : tip.usedAt === null));
     if (query?.agentId) {
       items = items.filter((tip) => tip.agentIds.includes(query.agentId as string));
     }
@@ -385,6 +437,9 @@ export class MockDesktopApi implements DesktopApi {
       title: input.title?.trim() || firstLine(content),
       content,
       status: "active",
+      colorKey: input.colorKey ?? (await this.suggestNoteColor()),
+      usedAt: null,
+      updatedAt: now,
       bindings: input.bindings.map((b) => ({ ...b })),
     };
     this.tips.unshift({ ...tip, bindings: tip.bindings.map((b) => ({ ...b })) });
@@ -424,6 +479,72 @@ export class MockDesktopApi implements DesktopApi {
     if (this.tips.length === before) {
       throw new Error(`便签不存在: ${id}`);
     }
+  }
+
+  async suggestNoteColor(): Promise<NoteColorKey> {
+    const recent = this.tips
+      .slice()
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+      .slice(0, 2)
+      .map((tip) => tip.colorKey);
+    const pool = SEED_COLORS.filter((color) => !recent.includes(color));
+    const candidates = pool.length > 0 ? pool : SEED_COLORS;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  async updateTipText(id: string, title: string, content: string): Promise<TipDetail> {
+    if (this.failures.save) {
+      throw new Error("模拟保存失败：数据库写入被拒绝");
+    }
+    const tip = this.tips.find((t) => t.id === id);
+    if (!tip) {
+      throw new Error(`便签不存在: ${id}`);
+    }
+    const trimmed = content.trim();
+    if (!trimmed) {
+      throw new Error("便签正文不能为空");
+    }
+    const previousColor = tip.colorKey;
+    const previousUsedAt = tip.usedAt;
+    const previousBindings = tip.bindings;
+    tip.title = title.trim() || firstLine(tip.content);
+    tip.content = trimmed;
+    tip.updatedAt = new Date().toISOString();
+    const result = detailOf(tip);
+    // text-only 不触碰其他字段
+    result.colorKey = previousColor;
+    result.usedAt = previousUsedAt;
+    tip.colorKey = previousColor;
+    tip.usedAt = previousUsedAt;
+    tip.bindings = previousBindings;
+    return result;
+  }
+
+  async markTipUsed(id: string): Promise<TipDetail> {
+    const tip = this.tips.find((t) => t.id === id);
+    if (!tip) {
+      throw new Error(`便签不存在: ${id}`);
+    }
+    tip.usedAt = new Date().toISOString();
+    return detailOf(tip);
+  }
+
+  async restoreTipUsed(id: string): Promise<TipDetail> {
+    const tip = this.tips.find((t) => t.id === id);
+    if (!tip) {
+      throw new Error(`便签不存在: ${id}`);
+    }
+    tip.usedAt = null;
+    return detailOf(tip);
+  }
+
+  async updateTipColor(id: string, colorKey: NoteColorKey): Promise<TipDetail> {
+    const tip = this.tips.find((t) => t.id === id);
+    if (!tip) {
+      throw new Error(`便签不存在: ${id}`);
+    }
+    tip.colorKey = colorKey;
+    return detailOf(tip);
   }
 
   async listAgents(): Promise<Agent[]> {
@@ -474,7 +595,7 @@ export class MockDesktopApi implements DesktopApi {
   reset(): void {
     this.agents = SEED_AGENTS.map((agent) => ({ ...agent }));
     this.tips = SEED_TIPS.map((tip) => ({
-      ...tip,
+      ...withSeedMeta(tip),
       bindings: tip.bindings.map((b) => ({ ...b })),
     }));
     this.settings = {

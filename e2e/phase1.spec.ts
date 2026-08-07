@@ -35,19 +35,22 @@ test.describe("Phase 1.5 交互流程", () => {
   test("主窗口：搜索与 Agent 筛选", async ({ page }) => {
     const errors = trackConsole(page);
     await page.goto("/?window=main");
-    await expect(page.getByText("修改前解释调用链")).toBeVisible();
+    await expect(page.getByLabel("标题").first()).toHaveValue("修改前解释调用链");
 
     await page.getByRole("button", { name: "搜索" }).click();
     await page.getByLabel("搜索便签").fill("测试");
-    await expect(page.getByText("完成后运行全部测试")).toBeVisible();
-    await expect(page.getByText("修改前解释调用链")).not.toBeVisible();
+    await expect(page.getByLabel("标题").first()).toHaveValue("完成后运行全部测试");
+    await expect(page.getByLabel("标题").first()).not.toHaveValue("修改前解释调用链");
 
     await page.getByLabel("搜索便签").fill("");
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "筛选" }).click();
-    await page.getByRole("checkbox", { name: "筛选 Cursor" }).check();
-    await expect(page.getByText("修改前解释调用链")).toBeVisible();
-    await expect(page.getByText("完成后运行全部测试")).not.toBeVisible();
+    await page.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: /筛选/ }).hover();
+    await page.getByRole("menuitem", { name: /筛选/ }).dispatchEvent("mouseenter");
+    await page.getByRole("checkbox", { name: "筛选 Cursor" }).waitFor({ timeout: 5000 });
+    await page.locator('div:has(> [aria-label="筛选 Cursor"])').first().click({ force: true });
+    await expect(page.getByLabel("标题").first()).toHaveValue("修改前解释调用链");
+    await expect(page.getByLabel("标题").first()).not.toHaveValue("完成后运行全部测试");
     expect(errors).toEqual([]);
   });
 

@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::color::NoteColorKey;
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -62,6 +63,8 @@ pub struct Tip {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub color_key: NoteColorKey,
+    pub used_at: Option<DateTime<Utc>>,
     pub bindings: Vec<TipBinding>,
 }
 
@@ -71,6 +74,7 @@ pub struct CreateTipCommand {
     pub title: Option<String>,
     pub content: String,
     pub status: TipStatus,
+    pub color_key: Option<NoteColorKey>,
     pub bindings: Vec<CreateBindingInput>,
 }
 
@@ -84,11 +88,22 @@ pub struct UpdateTipCommand {
     pub bindings: Option<Vec<CreateBindingInput>>,
 }
 
+/// Text-only 更新：只允许修改 title/content/updated_at，
+/// 禁止修改 bindings / color_key / used_at / status。
+#[derive(Debug, Clone)]
+pub struct UpdateTipTextCommand {
+    pub id: Uuid,
+    pub title: String,
+    pub content: String,
+}
+
 /// 查询输入。
 #[derive(Debug, Clone, Default)]
 pub struct TipQuery {
     pub search: Option<String>,
     pub agent_id: Option<Uuid>,
+    /// None = 仅未使用（首页默认）；Some(true) = 仅已使用；Some(false) = 未使用。
+    pub used: Option<bool>,
 }
 
 impl CreateTipCommand {
@@ -112,6 +127,15 @@ impl UpdateTipCommand {
         }
         if let Some(bindings) = &self.bindings {
             ensure_unique_bindings(bindings)?;
+        }
+        Ok(())
+    }
+}
+
+impl UpdateTipTextCommand {
+    pub fn validate(&self) -> AppResult<()> {
+        if self.content.trim().is_empty() {
+            return Err(AppError::Validation("正文不能为空".into()));
         }
         Ok(())
     }
@@ -160,6 +184,7 @@ mod tests {
             title: None,
             content: "   \n  ".into(),
             status: TipStatus::Active,
+            color_key: None,
             bindings: vec![],
         };
         assert!(matches!(input.validate(), Err(AppError::Validation(_))));
@@ -171,6 +196,7 @@ mod tests {
             title: None,
             content: "  hello  ".into(),
             status: TipStatus::Active,
+            color_key: None,
             bindings: vec![],
         };
         assert!(input.validate().is_ok());
@@ -182,6 +208,7 @@ mod tests {
             title: None,
             content: "content".into(),
             status: TipStatus::Active,
+            color_key: None,
             bindings: vec![
                 CreateBindingInput {
                     agent_id: agent_id("10000000-0000-0000-0000-000000000002"),
@@ -202,6 +229,7 @@ mod tests {
             title: None,
             content: "content".into(),
             status: TipStatus::Active,
+            color_key: None,
             bindings: vec![
                 CreateBindingInput {
                     agent_id: agent_id("10000000-0000-0000-0000-000000000002"),
@@ -255,5 +283,24 @@ mod tests {
         );
         assert_eq!(normalized_title(Some("   "), "abc"), Some("abc".into()));
         assert_eq!(normalized_title(Some(" 标题 "), "abc"), Some("标题".into()));
+    }
+
+    #[test]
+    fn text_update_rejects_empty_content() {
+        let empty = UpdateTipTextCommand {
+            id: agent_id("00000000-0000-0000-0000-000000000001"),
+            title: "标题".into(),
+            content: "  ".into(),
+        };
+        assert!(matches!(empty.validate(), Err(AppError::Validation(_))));
+    }
+
+    #[test]
+    fn color_key_parse_round_trip() {
+        for key in super::super::color::ALL_NOTE_COLORS {
+            assert_eq!(NoteColorKey::parse(key.as_str()).unwrap(), key);
+        }
+        assert!(NoteColorKey::parse("purple").is_err());
+        assert!(NoteColorKey::parse("white").is_err());
     }
 }

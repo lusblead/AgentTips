@@ -71,6 +71,21 @@ $expectedMap = if ($Directory -eq "phase-1.5") {
         "quick-note-multiple-agents.png" = "1000x750"
         "settings.png" = "1000x750"
     }
+} elseif ($Directory -eq "phase-2.4") {
+    @{
+        "home-color-wall.png" = "1000x750"
+        "home-color-wall-many.png" = "1000x750"
+        "home-variable-height.png" = "1000x750"
+        "home-inline-editing.png" = "1000x750"
+        "home-note-hover.png" = "1000x750"
+        "home-long-note.png" = "1000x750"
+        "used-notes.png" = "1000x750"
+        "used-notes-empty.png" = "1000x750"
+        "quick-note-lemon.png" = "1000x750"
+        "quick-note-mint.png" = "1000x750"
+        "quick-note-multiple-agents.png" = "1000x750"
+        "note-detail.png" = "1000x750"
+    }
 } else {
     @{}
 }
@@ -109,7 +124,7 @@ foreach ($name in $files) {
     }
     $contentRatio = $nonBg / $total
     $minRatio = 0.01
-    if ($Directory -in @("phase-2.1", "phase-2.2", "phase-2.3")) {
+    if ($Directory -in @("phase-2.1", "phase-2.2", "phase-2.3", "phase-2.4")) {
         $minRatio = 0.002
     }
     if ($name -eq "main-window-empty.png") {
@@ -122,6 +137,10 @@ foreach ($name in $files) {
     $edgeThreshold = 60
     if ($Directory -eq "phase-2.3" -or $name -like "quick-note*") {
         # pastel 全屏底色窗口：边缘像素为设计底色而非裁切
+        $edgeThreshold = 25000
+    }
+    if ($Directory -eq "phase-2.4") {
+        # 彩色便签墙 + 全屏纸面：边缘像素为设计色彩而非裁切
         $edgeThreshold = 25000
     }
     if ($edgeNonBg -gt $edgeThreshold) {

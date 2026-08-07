@@ -25,3 +25,4 @@ thiserror = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"

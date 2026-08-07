@@ -130,4 +130,33 @@ describe("快捷新建窗口", () => {
     await selectAgent(user, "Cursor");
     expect(save).toBeEnabled();
   });
+
+  it("外层 Canvas 保持 neutral，Note Surface 使用 Palette 颜色", async () => {
+    const api = new MockDesktopApi();
+    await renderQuickNote(api);
+    const main = screen.getByTestId("quick-note-shell");
+    const surface = screen.getByTestId("note-surface");
+    expect(main.className).toContain("bg-surface-canvas");
+    expect(surface.className).toContain("bg-note-");
+    expect(surface.getAttribute("data-color")).toBeTruthy();
+  });
+
+  it("Textarea 透明且 Note Surface 颜色来自 suggestNoteColor", async () => {
+    const api = new MockDesktopApi();
+    const suggestSpy = vi.spyOn(api, "suggestNoteColor");
+    await renderQuickNote(api);
+    expect(suggestSpy).toHaveBeenCalled();
+    const textarea = screen.getByLabelText("正文");
+    expect(textarea.className).toContain("bg-transparent");
+  });
+
+  it("每次重新打开 Quick Note 都会重新请求颜色", async () => {
+    const api = new MockDesktopApi();
+    const suggestSpy = vi.spyOn(api, "suggestNoteColor");
+    const first = await renderQuickNote(api);
+    first.unmount();
+    const second = await renderQuickNote(api);
+    expect(suggestSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    second.unmount();
+  });
 });

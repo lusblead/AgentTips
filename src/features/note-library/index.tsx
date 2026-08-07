@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
-  Check,
+  ArrowLeft,
   Info,
   MoreHorizontal,
   Plus,
@@ -17,11 +17,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TipCard } from "@/components/shared/TipCard";
 import { desktopErrorMessage } from "@/desktop-api/contract";
 import type { Agent, DesktopApi, TipDetail, TipSummary } from "@/desktop-api/contract";
@@ -35,12 +37,15 @@ export interface NoteLibraryWindowProps {
   onOpenSettings?: () => void;
 }
 
-type StatusFilter = "all" | "active" | "archived";
+interface UndoToast {
+  tipId: string;
+  title: string;
+}
 
 /**
- * Home Experience：打开即见"便签墙"。
- * Toolbar（AgentTips / Search / + / ···）+ Tip Grid + Floating Editor。
- * Agent 仅为 metadata，筛选在 Popover，无永久 Sidebar / Inspector。
+ * Home Experience：打开即见"便签墙"（可变高度 Masonry）。
+ * 首页便签支持 WYSIWYG inline editing + 650ms autosave；
+ * Mark Used 后移入「已使用」独立视图，可 Restore 或 Undo。
  */
 export default function NoteLibraryWindow({
   api,
@@ -50,6 +55,8 @@ export default function NoteLibraryWindow({
 }: NoteLibraryWindowProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tips, setTips] = useState<TipSummary[]>([]);
+  const [usedTips, setUsedTips] = useState<TipSummary[]>([]);
+  const [view, setView] = useState<"home" | "used">("home");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -57,25 +64,26 @@ export default function NoteLibraryWindow({
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const [filterOpen, setFilterOpen] = useState(false);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(
     initialAgentId ? [initialAgentId] : [],
   );
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-
   const [editingTip, setEditingTip] = useState<TipDetail | null>(null);
+  const [toast, setToast] = useState<UndoToast | null>(null);
+  const [leavingIds, setLeavingIds] = useState<string[]>([]);
 
-  const loadTips = useCallback(async () => {
-    setLoadError(null);
-    try {
-      const list = await api.listTips({});
-      setTips(list);
-    } catch (err) {
-      setLoadError(desktopErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
+  const loadTips = useCallback(
+    async (used: boolean) => {
+      setLoadError(null);
+      try {
+        const list = await api.listTips(used ? { used: true } : {});
+        if (used) setUsedTips(list);
+        else setTips(list);
+      } catch (err) {
+        setLoadError(desktopErrorMessage(err));
+      }
+    },
+    [api],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -83,21 +91,6 @@ export default function NoteLibraryWindow({
       .listAgents()
       .then((list) => {
         if (!cancelled) setAgents(list);
-      })
-      .catch((err) => {
-        if (!cancelled) setLoadError(desktopErrorMessage(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .listTips({})
-      .then((list) => {
-        if (!cancelled) setTips(list);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(desktopErrorMessage(err));
@@ -109,6 +102,23 @@ export default function NoteLibraryWindow({
       cancelled = true;
     };
   }, [api]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listTips(view === "used" ? { used: true } : {})
+      .then((list) => {
+        if (cancelled) return;
+        if (view === "used") setUsedTips(list);
+        else setTips(list);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(desktopErrorMessage(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, view]);
 
   // Cmd/Ctrl + F 展开搜索
   useEffect(() => {
@@ -124,21 +134,24 @@ export default function NoteLibraryWindow({
   }, []);
 
   useEffect(() => {
-    if (searchOpen) {
-      searchRef.current?.focus();
-    }
+    if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
 
+  // Undo Toast 5 秒自动消失
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const sourceTips = view === "used" ? usedTips : tips;
   const filteredTips = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return tips.filter((tip) => {
+    return sourceTips.filter((tip) => {
       if (
         selectedAgentIds.length > 0 &&
         !tip.agentIds.some((id) => selectedAgentIds.includes(id))
       ) {
-        return false;
-      }
-      if (statusFilter !== "all" && tip.status !== statusFilter) {
         return false;
       }
       if (needle) {
@@ -148,11 +161,10 @@ export default function NoteLibraryWindow({
       }
       return true;
     });
-  }, [search, selectedAgentIds, statusFilter, tips]);
+  }, [search, selectedAgentIds, sourceTips]);
 
-  const hasActiveFilter = selectedAgentIds.length > 0 || statusFilter !== "all";
-  const hasSearch = search.trim().length > 0;
-  const emptyWorkspace = !loading && !loadError && tips.length === 0;
+  const hasActiveFilter = selectedAgentIds.length > 0;
+  const emptyWorkspace = !loading && !loadError && sourceTips.length === 0;
   const noResults = !emptyWorkspace && filteredTips.length === 0;
 
   const toggleAgentFilter = (agentId: string) => {
@@ -163,7 +175,6 @@ export default function NoteLibraryWindow({
 
   const clearFilters = () => {
     setSelectedAgentIds([]);
-    setStatusFilter("all");
     setSearch("");
   };
 
@@ -171,9 +182,7 @@ export default function NoteLibraryWindow({
     async (id: string) => {
       try {
         const tip = await api.getTip(id);
-        if (tip) {
-          setEditingTip(tip);
-        }
+        if (tip) setEditingTip(tip);
       } catch (err) {
         setLoadError(desktopErrorMessage(err));
       }
@@ -181,35 +190,199 @@ export default function NoteLibraryWindow({
     [api],
   );
 
-  const handleTipUpdated = (updated: TipDetail) => {
-    setTips((current) =>
-      current.map((tip) =>
-        tip.id === updated.id
-          ? {
-              ...tip,
-              title: updated.title,
-              content: updated.content,
-              agentIds: updated.bindings.map((b) => b.agentId),
-              updatedAt: updated.updatedAt,
-            }
-          : tip,
-      ),
-    );
-  };
+  const handleTextSaved = useCallback(
+    async (id: string, title: string, content: string) => {
+      const updated = await api.updateTipText(id, title, content);
+      const patch = (tip: TipSummary): TipSummary => ({
+        ...tip,
+        title: updated.title,
+        content: updated.content,
+        updatedAt: updated.updatedAt,
+      });
+      setTips((current) => current.map((tip) => (tip.id === id ? patch(tip) : tip)));
+      setUsedTips((current) => current.map((tip) => (tip.id === id ? patch(tip) : tip)));
+    },
+    [api],
+  );
 
-  const handleTipDeleted = (id: string) => {
-    setTips((current) => {
-      const next = current.filter((tip) => tip.id !== id);
-      if (next.length === 0) {
-        // 全部删除后回到干净的 Empty Workspace
-        setSearch("");
-        setSearchOpen(false);
-        setSelectedAgentIds([]);
-        setStatusFilter("all");
-      }
-      return next;
+  const handleTipUpdated = useCallback((updated: TipDetail) => {
+    const patch = (tip: TipSummary): TipSummary => ({
+      ...tip,
+      title: updated.title,
+      content: updated.content,
+      colorKey: updated.colorKey,
+      agentIds: updated.bindings.map((b) => b.agentId),
+      updatedAt: updated.updatedAt,
     });
-  };
+    setTips((current) => current.map((tip) => (tip.id === updated.id ? patch(tip) : tip)));
+    setUsedTips((current) => current.map((tip) => (tip.id === updated.id ? patch(tip) : tip)));
+  }, []);
+
+  const handleTipDeleted = useCallback((id: string) => {
+    setTips((current) => current.filter((tip) => tip.id !== id));
+    setUsedTips((current) => current.filter((tip) => tip.id !== id));
+  }, []);
+
+  const handleMarkUsed = useCallback(
+    async (id: string) => {
+      const tip = tips.find((t) => t.id === id);
+      setLeavingIds((current) => [...current, id]);
+      window.setTimeout(() => {
+        setLeavingIds((current) => current.filter((x) => x !== id));
+        setTips((current) => current.filter((t) => t.id !== id));
+        setToast({ tipId: id, title: tip?.title ?? "便签" });
+      }, 180);
+      try {
+        await api.markTipUsed(id);
+        void loadTips(true);
+      } catch (err) {
+        setLoadError(desktopErrorMessage(err));
+      }
+    },
+    [api, loadTips, tips],
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (!toast) return;
+    const id = toast.tipId;
+    setToast(null);
+    try {
+      await api.restoreTipUsed(id);
+      setUsedTips((current) => current.filter((t) => t.id !== id));
+      void loadTips(false);
+    } catch (err) {
+      setLoadError(desktopErrorMessage(err));
+    }
+  }, [api, loadTips, toast]);
+
+  const handleRestoreUsed = useCallback(
+    async (id: string) => {
+      try {
+        await api.restoreTipUsed(id);
+        setUsedTips((current) => current.filter((t) => t.id !== id));
+        setView("home");
+        void loadTips(false);
+      } catch (err) {
+        setLoadError(desktopErrorMessage(err));
+      }
+    },
+    [api, loadTips],
+  );
+
+  const renderToolbar = () => (
+    <div className="flex items-center gap-1">
+      {searchOpen ? (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+          <Input
+            ref={searchRef}
+            aria-label="搜索便签"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索便签…"
+            className="h-8 w-64 pl-8 pr-8"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setSearchOpen(false);
+                setSearch("");
+              }
+            }}
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="清除搜索"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-text-muted hover:text-text-primary focus:outline-none focus-visible:bg-surface-hover"
+              onClick={() => setSearch("")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label="搜索"
+          onClick={() => setSearchOpen(true)}
+        >
+          <Search className="h-4 w-4" />
+        </Button>
+      )}
+      {view === "home" && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label="新建提示"
+          onClick={onNewTip}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="更多操作">
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          {view === "home" && (
+            <>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  筛选
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  <p className="px-2 py-1 text-secondary-size font-medium text-text-muted">Agent</p>
+                  {agents.map((agent) => {
+                    const checked = selectedAgentIds.includes(agent.id);
+                    return (
+                      <div
+                        key={agent.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-hover"
+                        onClick={() => toggleAgentFilter(agent.id)}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          aria-label={`筛选 ${agent.name}`}
+                          className="pointer-events-none"
+                        />
+                        <span className="flex-1">{agent.name}</span>
+                      </div>
+                    );
+                  })}
+                  <DropdownMenuSeparator />
+                  <button
+                    type="button"
+                    className="w-full rounded-md px-2 py-1 text-left text-sm text-text-muted hover:bg-surface-hover focus:outline-none"
+                    onClick={clearFilters}
+                  >
+                    清除全部筛选
+                  </button>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onSelect={() => setView("used")}>
+                <Archive className="h-4 w-4" />
+                已使用便签
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem onSelect={onOpenSettings}>
+            <Settings className="h-4 w-4" />
+            设置
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <Info className="h-4 w-4" />
+            关于
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
 
   return (
     <main
@@ -218,154 +391,25 @@ export default function NoteLibraryWindow({
       data-testid="main-layout"
     >
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle px-4 py-2">
-        <h2 className="text-page-title font-semibold tracking-tight">AgentTips</h2>
-        <div className="flex items-center gap-1">
-          {searchOpen ? (
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-              <Input
-                ref={searchRef}
-                aria-label="搜索便签"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索便签…"
-                className="h-8 w-64 pl-8 pr-8"
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setSearchOpen(false);
-                    setSearch("");
-                  }
-                }}
-              />
-              {search && (
-                <button
-                  type="button"
-                  aria-label="清除搜索"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-text-muted hover:text-text-primary focus:outline-none focus-visible:bg-surface-hover"
-                  onClick={() => setSearch("")}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              aria-label="搜索"
-              onClick={() => setSearchOpen(true)}
-            >
-              <Search className="h-4 w-4" />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            aria-label="新建提示"
-            onClick={onNewTip}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-            <PopoverTrigger asChild>
+        <div className="flex min-w-0 items-center gap-2">
+          {view === "used" ? (
+            <>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                aria-label="筛选"
-                data-active={hasActiveFilter ? "true" : undefined}
+                size="sm"
+                className="gap-1.5 px-2"
+                aria-label="返回首页"
+                onClick={() => setView("home")}
               >
-                <SlidersHorizontal className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4" />
               </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-64">
-              <div className="flex flex-col gap-3">
-                <div>
-                  <p className="mb-1.5 text-secondary-size font-medium text-text-muted">Agent</p>
-                  <div className="flex flex-col gap-1">
-                    {agents.map((agent) => {
-                      const checked = selectedAgentIds.includes(agent.id);
-                      return (
-                        <label
-                          key={agent.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-hover"
-                        >
-                          <Checkbox
-                            checked={checked}
-                            aria-label={`筛选 ${agent.name}`}
-                            onCheckedChange={() => toggleAgentFilter(agent.id)}
-                          />
-                          <span className="flex-1">{agent.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-1.5 text-secondary-size font-medium text-text-muted">状态</p>
-                  <div className="flex flex-col gap-1">
-                    {(
-                      [
-                        ["all", "全部"],
-                        ["active", "使用中"],
-                        ["archived", "已归档"],
-                      ] as Array<[StatusFilter, string]>
-                    ).map(([value, label]) => {
-                      const active = statusFilter === value;
-                      return (
-                        <button
-                          key={value}
-                          type="button"
-                          className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
-                          onClick={() => setStatusFilter(value)}
-                        >
-                          <span
-                            className={`flex h-4 w-4 items-center justify-center rounded-sm border ${
-                              active
-                                ? "border-accent bg-accent text-primary-foreground"
-                                : "border-border-default"
-                            }`}
-                          >
-                            {active && <Check className="h-3 w-3" />}
-                          </span>
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="h-px bg-border-subtle" />
-                <Button variant="ghost" size="sm" onClick={clearFilters}>
-                  清除全部筛选
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="更多操作">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onSelect={onOpenSettings}>
-                <Settings className="h-4 w-4" />
-                设置
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>
-                <Archive className="h-4 w-4" />
-                归档
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled>
-                <Info className="h-4 w-4" />
-                关于
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <h2 className="text-page-title font-semibold tracking-tight">已使用</h2>
+            </>
+          ) : (
+            <h2 className="text-page-title font-semibold tracking-tight">AgentTips</h2>
+          )}
         </div>
+        {renderToolbar()}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -387,17 +431,6 @@ export default function NoteLibraryWindow({
                 </button>
               );
             })}
-            {statusFilter !== "all" && (
-              <button
-                type="button"
-                aria-label="清除状态筛选"
-                className="flex items-center gap-1 rounded-full bg-surface-secondary px-2.5 py-1 text-secondary-size text-text-secondary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
-                onClick={() => setStatusFilter("all")}
-              >
-                {statusFilter === "active" ? "使用中" : "已归档"}
-                <X className="h-3 w-3" />
-              </button>
-            )}
             <button
               type="button"
               className="px-1 text-secondary-size text-text-muted underline-offset-2 hover:underline focus:outline-none"
@@ -417,14 +450,14 @@ export default function NoteLibraryWindow({
                 size="sm"
                 onClick={() => {
                   setLoading(true);
-                  void loadTips();
+                  void loadTips(view === "used");
                 }}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 重试
               </Button>
             </div>
-          ) : loading && tips.length === 0 ? (
+          ) : loading && sourceTips.length === 0 ? (
             <p className="py-16 text-center text-secondary-size text-text-muted">加载中…</p>
           ) : emptyWorkspace ? (
             <div
@@ -434,47 +467,53 @@ export default function NoteLibraryWindow({
               <div className="rounded-full bg-surface-secondary p-4">
                 <Plus className="h-6 w-6 text-text-muted" />
               </div>
-              <p className="text-body font-semibold">还没有便签</p>
+              <p className="text-body font-semibold">
+                {view === "used" ? "还没有已使用的便签" : "还没有便签"}
+              </p>
               <p className="max-w-xs text-secondary-size text-text-muted">
-                随时记录你希望 Agent 记住的事情。
+                {view === "used"
+                  ? "标记为已使用的便签会收进这里。"
+                  : "随时记录你希望 Agent 记住的事情。"}
               </p>
-              <Button size="sm" onClick={onNewTip}>
-                <Plus className="h-4 w-4" />
-                创建第一张便签
-              </Button>
-              <p className="text-caption text-text-muted">
-                <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
-                  Ctrl
-                </kbd>
-                <span className="mx-0.5">+</span>
-                <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
-                  F12
-                </kbd>
-              </p>
+              {view === "home" && (
+                <>
+                  <Button size="sm" onClick={onNewTip}>
+                    <Plus className="h-4 w-4" />
+                    创建第一张便签
+                  </Button>
+                  <p className="text-caption text-text-muted">
+                    <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
+                      Ctrl
+                    </kbd>
+                    <span className="mx-0.5">+</span>
+                    <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
+                      F12
+                    </kbd>
+                  </p>
+                </>
+              )}
             </div>
           ) : noResults ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="text-body font-medium">
-                {hasSearch || hasActiveFilter ? "没有匹配的便签" : "还没有便签"}
-              </p>
-              <p className="text-secondary-size text-text-muted">
-                {hasSearch || hasActiveFilter ? "换个关键词或清除筛选试试" : ""}
-              </p>
+              <p className="text-body font-medium">没有匹配的便签</p>
+              <p className="text-secondary-size text-text-muted">换个关键词或清除筛选试试</p>
             </div>
           ) : (
-            <div
-              className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 pb-8"
-              data-testid="tip-grid"
-            >
+            <MasonryGrid data-testid="tip-grid" className="pb-8" gap={14}>
               {filteredTips.map((tip) => (
                 <TipCard
                   key={tip.id}
                   tip={tip}
                   agents={agents}
-                  onClick={() => void openTip(tip.id)}
+                  onExpand={() => void openTip(tip.id)}
+                  onTextChange={handleTextSaved}
+                  onMarkUsed={view === "home" ? (id) => void handleMarkUsed(id) : undefined}
+                  onRestoreUsed={view === "used" ? (id) => void handleRestoreUsed(id) : undefined}
+                  usedView={view === "used"}
+                  leaving={leavingIds.includes(tip.id)}
                 />
               ))}
-            </div>
+            </MasonryGrid>
           )}
         </div>
       </div>
@@ -487,6 +526,69 @@ export default function NoteLibraryWindow({
         onTipUpdated={handleTipUpdated}
         onTipDeleted={handleTipDeleted}
       />
+
+      {toast && (
+        <div
+          className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-border-default bg-surface-primary px-4 py-2 shadow-popover"
+          role="status"
+          data-testid="used-toast"
+        >
+          <span className="text-secondary-size text-text-primary">已移至「已使用」</span>
+          <button
+            type="button"
+            className="text-secondary-size font-medium text-accent hover:text-accent-hover focus:outline-none"
+            onClick={() => void handleUndo()}
+          >
+            撤销
+          </button>
+        </div>
+      )}
     </main>
+  );
+}
+
+/**
+ * Variable-height Masonry：CSS Grid + ResizeObserver + grid-auto-rows。
+ * 每张卡片按实际高度计算 span，短卡保持短、长卡向下生长。
+ */
+function MasonryGrid({
+  children,
+  className,
+  gap = 14,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { gap?: number }) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const rowUnit = 8;
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const observer = new ResizeObserver(() => {
+      const cards = grid.querySelectorAll<HTMLElement>("[data-testid='tip-card']");
+      cards.forEach((card) => {
+        const height = card.getBoundingClientRect().height;
+        const span = Math.max(1, Math.ceil((height + gap) / (rowUnit + gap)));
+        card.style.gridRowEnd = `span ${span}`;
+      });
+    });
+    observer.observe(grid);
+    const cards = grid.querySelectorAll<HTMLElement>("[data-testid='tip-card']");
+    cards.forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [gap, children]);
+
+  return (
+    <div
+      ref={gridRef}
+      className={`grid grid-cols-[repeat(auto-fill,minmax(236px,248px))] items-start ${className ?? ""}`}
+      style={{
+        gridAutoRows: `${rowUnit}px`,
+        gap: `${gap}px`,
+        gridAutoFlow: "row dense",
+      }}
+      {...props}
+    >
+      {children}
+    </div>
   );
 }

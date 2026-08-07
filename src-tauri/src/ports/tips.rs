@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+use crate::domain::color::NoteColorKey;
 use crate::domain::tips::{Tip, TipBinding, TipQuery};
 use crate::error::AppResult;
 
@@ -11,4 +12,17 @@ pub trait TipRepository: Send + Sync {
     fn get(&self, id: Uuid) -> AppResult<Option<Tip>>;
     fn list(&self, query: &TipQuery) -> AppResult<Vec<Tip>>;
     fn delete(&self, id: Uuid) -> AppResult<()>;
+    /// 最近创建的 2 张 Tip 的颜色（含已使用，用于颜色建议）。
+    fn recent_color_keys(&self, limit: usize) -> AppResult<Vec<NoteColorKey>>;
+    /// Text-only 更新：只改 title/content/updated_at。
+    fn update_text(
+        &self,
+        id: Uuid,
+        title: &str,
+        content: &str,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<Tip>;
+    fn mark_used(&self, id: Uuid, used_at: chrono::DateTime<chrono::Utc>) -> AppResult<Tip>;
+    fn restore_used(&self, id: Uuid) -> AppResult<Tip>;
+    fn update_color(&self, id: Uuid, color_key: NoteColorKey) -> AppResult<Tip>;
 }

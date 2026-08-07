@@ -10,6 +10,7 @@ import {
   type HotkeyCandidate,
   type HotkeyPreviewResult,
   type MockFailureKind,
+  type NoteColorKey,
   type ReminderPreview,
   type TipDetail,
   type TipQuery,
@@ -111,6 +112,48 @@ export class TauriDesktopApi implements DesktopApi {
   async deleteTip(id: string): Promise<void> {
     try {
       await invoke<void>("tip_delete", { id });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async suggestNoteColor(): Promise<NoteColorKey> {
+    try {
+      return await invoke<NoteColorKey>("note_color_suggest");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateTipText(id: string, title: string, content: string): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_update_text", {
+        input: { id, title, content },
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async markTipUsed(id: string): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_mark_used", { id });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async restoreTipUsed(id: string): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_restore_used", { id });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateTipColor(id: string, colorKey: NoteColorKey): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_update_color", { id, colorKey });
     } catch (error) {
       throw toDesktopError(error);
     }

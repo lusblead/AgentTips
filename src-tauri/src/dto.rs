@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentKind};
+use crate::domain::color::NoteColorKey;
 use crate::domain::tips::{CreateBindingInput, Tip, TipStatus};
 
 // ---------- 输入 DTO（与 src/desktop-api/contract.ts camelCase 对应） ----------
@@ -12,6 +13,7 @@ use crate::domain::tips::{CreateBindingInput, Tip, TipStatus};
 pub struct CreateTipInputDto {
     pub title: Option<String>,
     pub content: String,
+    pub color_key: Option<NoteColorKey>,
     #[serde(default)]
     pub status: Option<TipStatus>,
     #[serde(default)]
@@ -42,6 +44,8 @@ pub struct UpdateTipInputDto {
 pub struct TipQueryDto {
     pub search: Option<String>,
     pub agent_id: Option<Uuid>,
+    /// 首页默认只展示未使用；Used View 传入 true。
+    pub used: Option<bool>,
 }
 
 // ---------- 输出 DTO ----------
@@ -64,6 +68,9 @@ pub struct TipDto {
     pub status: TipStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub color_key: NoteColorKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<DateTime<Utc>>,
     pub bindings: Vec<TipBindingDto>,
 }
 
@@ -76,7 +83,18 @@ pub struct TipSummaryDto {
     pub content: String,
     pub status: TipStatus,
     pub updated_at: DateTime<Utc>,
+    pub color_key: NoteColorKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<DateTime<Utc>>,
     pub agent_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTipTextInputDto {
+    pub id: Uuid,
+    pub title: String,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +116,8 @@ impl From<&Tip> for TipDto {
             status: tip.status,
             created_at: tip.created_at,
             updated_at: tip.updated_at,
+            color_key: tip.color_key,
+            used_at: tip.used_at,
             bindings: tip
                 .bindings
                 .iter()
@@ -119,6 +139,8 @@ impl From<&Tip> for TipSummaryDto {
             content: tip.content.clone(),
             status: tip.status,
             updated_at: tip.updated_at,
+            color_key: tip.color_key,
+            used_at: tip.used_at,
             agent_ids: tip.bindings.iter().map(|b| b.agent_id).collect(),
         }
     }
@@ -141,6 +163,7 @@ impl CreateTipInputDto {
         crate::domain::tips::CreateTipCommand {
             title: self.title,
             content: self.content,
+            color_key: self.color_key,
             status: self.status.unwrap_or(TipStatus::Active),
             bindings: self
                 .bindings
@@ -150,6 +173,16 @@ impl CreateTipInputDto {
                     auto_attach: b.auto_attach,
                 })
                 .collect(),
+        }
+    }
+}
+
+impl UpdateTipTextInputDto {
+    pub fn into_domain(self) -> crate::domain::tips::UpdateTipTextCommand {
+        crate::domain::tips::UpdateTipTextCommand {
+            id: self.id,
+            title: self.title,
+            content: self.content,
         }
     }
 }
@@ -195,6 +228,8 @@ mod tests {
             created_at: t,
             updated_at: t,
             deleted_at: None,
+            color_key: NoteColorKey::Lemon,
+            used_at: None,
             bindings: vec![crate::domain::tips::TipBinding {
                 agent_id: uuid("22222222-2222-2222-2222-222222222222"),
                 auto_attach: true,

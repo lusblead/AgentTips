@@ -8,12 +8,16 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentKind};
+use crate::domain::color::NoteColorKey;
 use crate::domain::tips::{Tip, TipBinding, TipQuery, TipStatus};
 use crate::error::{AppError, AppResult};
 use crate::ports::agents::AgentRepository;
 use crate::ports::tips::TipRepository;
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../../migrations/0001_init.sql")),
+    (2, include_str!("../../migrations/0002_living_notes.sql")),
+];
 
 /// 内置 Agent 初始名单（docs/03-domain-data-model.md）。
 const BUILTIN_AGENTS: &[(&str, &str, AgentKind)] = &[
@@ -47,7 +51,10 @@ impl SqliteDatabase {
         // 单连接 Mutex 串行化自身访问；busy_timeout 防止与外部进程短暂写竞争时报 locked。
         conn.busy_timeout(Duration::from_millis(5000))
             .map_err(AppError::from)?;
-        run_migrations(&conn)?;
+        let just_upgraded_to_living_notes = run_migrations(&conn)?;
+        if just_upgraded_to_living_notes {
+            backfill_tip_colors(&conn)?;
+        }
         seed_builtin_agents(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -68,7 +75,8 @@ fn apply_migration(conn: &Connection, version: i64, sql: &str) -> AppResult<()> 
     Ok(())
 }
 
-fn run_migrations(conn: &Connection) -> AppResult<()> {
+/// 返回 true 表示刚应用了 migration 2（需要执行旧数据 color backfill）。
+fn run_migrations(conn: &Connection) -> AppResult<bool> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY,
@@ -77,6 +85,7 @@ fn run_migrations(conn: &Connection) -> AppResult<()> {
     )
     .map_err(AppError::from)?;
 
+    let mut upgraded_to_living = false;
     for (version, sql) in MIGRATIONS {
         let applied: Option<i64> = conn
             .query_row(
@@ -90,6 +99,43 @@ fn run_migrations(conn: &Connection) -> AppResult<()> {
             continue;
         }
         apply_migration(conn, *version, sql)?;
+        if *version == 2 {
+            upgraded_to_living = true;
+        }
+    }
+    Ok(upgraded_to_living)
+}
+
+/// FNV-1a 32 位稳定散列（与前端历史 backfill 同源；仅用于旧数据迁移）。
+fn stable_hash(input: &str) -> u32 {
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in input.bytes() {
+        hash ^= byte as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
+}
+
+/// 旧 Tip 确定性 backfill：stableHash(id) % 10 -> 10 色之一。
+/// 只在 migration 2 刚应用时执行一次；此后 color_key 为数据库持久属性。
+fn backfill_tip_colors(conn: &Connection) -> AppResult<()> {
+    let colors: Vec<NoteColorKey> = crate::domain::color::ALL_NOTE_COLORS.to_vec();
+    let mut stmt = conn
+        .prepare("SELECT id FROM tips")
+        .map_err(AppError::from)?;
+    let ids: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(AppError::from)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(AppError::from)?;
+    drop(stmt);
+    for id in ids {
+        let idx = (stable_hash(&id) as usize) % colors.len();
+        conn.execute(
+            "UPDATE tips SET color_key = ?1 WHERE id = ?2",
+            params![colors[idx].as_str(), id],
+        )
+        .map_err(AppError::from)?;
     }
     Ok(())
 }
@@ -144,6 +190,8 @@ fn tip_from_row(row: &Row) -> rusqlite::Result<Tip> {
     let created_at: String = row.get(4)?;
     let updated_at: String = row.get(5)?;
     let deleted_at: Option<String> = row.get(6)?;
+    let color_key: String = row.get(7)?;
+    let used_at: Option<String> = row.get(8)?;
     Ok(Tip {
         id: Uuid::from_str(&id).map_err(|e| rusqlite::Error::InvalidColumnName(e.to_string()))?,
         title,
@@ -155,6 +203,9 @@ fn tip_from_row(row: &Row) -> rusqlite::Result<Tip> {
         updated_at: parse_rfc(&updated_at)
             .ok_or_else(|| rusqlite::Error::InvalidColumnName("updated_at".into()))?,
         deleted_at: deleted_at.and_then(|v| parse_rfc(&v)),
+        color_key: NoteColorKey::parse(&color_key)
+            .map_err(|e| rusqlite::Error::InvalidColumnName(e.to_string()))?,
+        used_at: used_at.and_then(|v| parse_rfc(&v)),
         bindings: Vec::new(),
     })
 }
@@ -223,7 +274,7 @@ fn load_bindings(conn: &Connection, tip_ids: &[Uuid]) -> AppResult<Vec<(Uuid, Ti
 fn load_tip(conn: &Connection, id: Uuid) -> AppResult<Option<Tip>> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, content, status, created_at, updated_at, deleted_at
+            "SELECT id, title, content, status, created_at, updated_at, deleted_at, color_key, used_at
              FROM tips WHERE id = ?1 AND deleted_at IS NULL",
         )
         .map_err(AppError::from)?;
@@ -285,14 +336,15 @@ impl TipRepository for SqliteDatabase {
         )?;
         let tx = conn.unchecked_transaction().map_err(AppError::from)?;
         tx.execute(
-            "INSERT INTO tips (id, title, content, status, created_at, updated_at, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL)",
+            "INSERT INTO tips (id, title, content, status, created_at, updated_at, deleted_at, color_key, used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL, ?6, NULL)",
             params![
                 tip.id.to_string(),
                 tip.title,
                 tip.content,
                 tip.status.as_str(),
-                rfc(tip.created_at)
+                rfc(tip.created_at),
+                tip.color_key.as_str(),
             ],
         )
         .map_err(AppError::from)?;
@@ -310,14 +362,15 @@ impl TipRepository for SqliteDatabase {
         let tx = conn.unchecked_transaction().map_err(AppError::from)?;
         let affected = tx
             .execute(
-                "UPDATE tips SET title = ?2, content = ?3, status = ?4, updated_at = ?5
+                "UPDATE tips SET title = ?2, content = ?3, status = ?4, updated_at = ?5, color_key = ?6
                  WHERE id = ?1 AND deleted_at IS NULL",
                 params![
                     tip.id.to_string(),
                     tip.title,
                     tip.content,
                     tip.status.as_str(),
-                    rfc(tip.updated_at)
+                    rfc(tip.updated_at),
+                    tip.color_key.as_str(),
                 ],
             )
             .map_err(AppError::from)?;
@@ -342,7 +395,7 @@ impl TipRepository for SqliteDatabase {
     fn list(&self, query: &TipQuery) -> AppResult<Vec<Tip>> {
         let conn = self.conn.lock().unwrap();
         let mut sql = String::from(
-            "SELECT id, title, content, status, created_at, updated_at, deleted_at
+            "SELECT id, title, content, status, created_at, updated_at, deleted_at, color_key, used_at
              FROM tips WHERE deleted_at IS NULL",
         );
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -357,6 +410,10 @@ impl TipRepository for SqliteDatabase {
                 " AND EXISTS (SELECT 1 FROM tip_agents b WHERE b.tip_id = tips.id AND b.agent_id = ?)",
             );
             args.push(Box::new(agent_id.to_string()));
+        }
+        match query.used {
+            Some(true) => sql.push_str(" AND used_at IS NOT NULL"),
+            Some(false) | None => sql.push_str(" AND used_at IS NULL"),
         }
         sql.push_str(" ORDER BY updated_at DESC, id ASC");
 
@@ -410,6 +467,87 @@ impl TipRepository for SqliteDatabase {
         tx.commit().map_err(AppError::from)?;
         Ok(())
     }
+
+    fn recent_color_keys(&self, limit: usize) -> AppResult<Vec<NoteColorKey>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT color_key FROM tips ORDER BY created_at DESC, id ASC LIMIT ?1")
+            .map_err(AppError::from)?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(AppError::from)?;
+        let mut keys = Vec::new();
+        for row in rows {
+            let raw = row.map_err(AppError::from)?;
+            if let Ok(key) = NoteColorKey::parse(&raw) {
+                keys.push(key);
+            }
+        }
+        Ok(keys)
+    }
+
+    fn update_text(
+        &self,
+        id: Uuid,
+        title: &str,
+        content: &str,
+        updated_at: DateTime<Utc>,
+    ) -> AppResult<Tip> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE tips SET title = ?2, content = ?3, updated_at = ?4
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id.to_string(), title, content, rfc(updated_at)],
+            )
+            .map_err(AppError::from)?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("Tip {} 不存在", id)));
+        }
+        load_tip(&conn, id)?.ok_or_else(|| AppError::Internal("更新后读取失败".into()))
+    }
+
+    fn mark_used(&self, id: Uuid, used_at: DateTime<Utc>) -> AppResult<Tip> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE tips SET used_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id.to_string(), rfc(used_at)],
+            )
+            .map_err(AppError::from)?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("Tip {} 不存在", id)));
+        }
+        load_tip(&conn, id)?.ok_or_else(|| AppError::Internal("标记后读取失败".into()))
+    }
+
+    fn restore_used(&self, id: Uuid) -> AppResult<Tip> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE tips SET used_at = NULL, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id.to_string(), rfc(Utc::now())],
+            )
+            .map_err(AppError::from)?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("Tip {} 不存在", id)));
+        }
+        load_tip(&conn, id)?.ok_or_else(|| AppError::Internal("恢复后读取失败".into()))
+    }
+
+    fn update_color(&self, id: Uuid, color_key: NoteColorKey) -> AppResult<Tip> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE tips SET color_key = ?2, updated_at = ?3 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id.to_string(), color_key.as_str(), rfc(Utc::now())],
+            )
+            .map_err(AppError::from)?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("Tip {} 不存在", id)));
+        }
+        load_tip(&conn, id)?.ok_or_else(|| AppError::Internal("更新颜色后读取失败".into()))
+    }
 }
 
 impl AgentRepository for SqliteDatabase {
@@ -434,6 +572,7 @@ impl AgentRepository for SqliteDatabase {
 mod tests {
     use super::*;
     use crate::domain::agents::AgentKind;
+    use crate::domain::color::NoteColorKey;
     use crate::domain::tips::TipStatus;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -460,6 +599,8 @@ mod tests {
             created_at: t,
             updated_at: t,
             deleted_at: None,
+            color_key: NoteColorKey::Lemon,
+            used_at: None,
             bindings: bindings.to_vec(),
         }
     }
@@ -882,6 +1023,134 @@ mod tests {
         assert_eq!(read.content, "重启后仍在");
         drop(db);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn backfill_gives_old_tips_varied_colors() {
+        let path = temp_db_path("backfill");
+        // 先手工构造 migration 1 的旧库（无 color_key 列）
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE tips (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    content TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    deleted_at TEXT
+                );
+                INSERT INTO tips VALUES
+                    ('11111111-1111-1111-1111-111111111111','a','x','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('22222222-2222-2222-2222-222222222222','b','y','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('33333333-3333-3333-3333-333333333333','c','z','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('44444444-4444-4444-4444-444444444444','d','w','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('55555555-5555-5555-5555-555555555555','e','v','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('66666666-6666-6666-6666-666666666666','f','u','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('77777777-7777-7777-7777-777777777777','g','t','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('88888888-8888-8888-8888-888888888888','h','s','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('99999999-9999-9999-9999-999999999999','i','r','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL),
+                    ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','j','q','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z',NULL);",
+            )
+            .unwrap();
+        }
+        // 打开后自动执行 migration 2 + backfill
+        let db = SqliteDatabase::open(&path).unwrap();
+        let tips = TipRepository::list(&db, &TipQuery::default()).unwrap();
+        assert_eq!(tips.len(), 10);
+        let colors: std::collections::HashSet<NoteColorKey> =
+            tips.iter().map(|t| t.color_key).collect();
+        assert!(
+            colors.len() >= 4,
+            "10 条旧 Tip 至少 4 种颜色，实际 {}",
+            colors.len()
+        );
+        assert!(tips
+            .iter()
+            .all(|t| crate::domain::color::ALL_NOTE_COLORS.contains(&t.color_key)));
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn used_filter_and_mark_restore_round_trip() {
+        let (db, agent_a, _) = setup_repo();
+        let tip = sample_tip(
+            Uuid::new_v4(),
+            None,
+            "生命周期",
+            &[binding(agent_a, true, 0)],
+        );
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+        // 首页（used=false/None）可见
+        assert_eq!(
+            TipRepository::list(&db, &TipQuery::default())
+                .unwrap()
+                .len(),
+            1
+        );
+        let used = TipRepository::mark_used(&db, created.id, now()).unwrap();
+        assert!(used.used_at.is_some());
+        assert_eq!(used.color_key, created.color_key, "mark used 不改颜色");
+        // 首页消失，Used View 可见
+        assert!(TipRepository::list(&db, &TipQuery::default())
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            TipRepository::list(
+                &db,
+                &TipQuery {
+                    used: Some(true),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        let restored = TipRepository::restore_used(&db, created.id).unwrap();
+        assert!(restored.used_at.is_none());
+        assert_eq!(restored.color_key, created.color_key, "restore 不改颜色");
+        assert_eq!(
+            TipRepository::list(&db, &TipQuery::default())
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn update_text_does_not_touch_other_fields() {
+        let (db, agent_a, _) = setup_repo();
+        let tip = sample_tip(
+            Uuid::new_v4(),
+            Some("原标题"),
+            "原正文",
+            &[binding(agent_a, true, 0)],
+        );
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+        let updated =
+            TipRepository::update_text(&db, created.id, "新标题", "新正文", now()).unwrap();
+        assert_eq!(updated.title.as_deref(), Some("新标题"));
+        assert_eq!(updated.content, "新正文");
+        assert_eq!(updated.color_key, created.color_key);
+        assert_eq!(updated.used_at, created.used_at);
+        assert_eq!(updated.status, created.status);
+        assert_eq!(updated.bindings, created.bindings);
+    }
+
+    #[test]
+    fn update_color_changes_key_only() {
+        let (db, agent_a, _) = setup_repo();
+        let tip = sample_tip(Uuid::new_v4(), None, "换色", &[binding(agent_a, true, 0)]);
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+        assert_ne!(created.color_key, NoteColorKey::Sky);
+        let updated = TipRepository::update_color(&db, created.id, NoteColorKey::Sky).unwrap();
+        assert_eq!(updated.color_key, NoteColorKey::Sky);
+        assert_eq!(updated.content, created.content);
+        assert_eq!(updated.used_at, created.used_at);
+        assert_eq!(updated.bindings, created.bindings);
     }
 
     // 防止 builtin_agents helper 未使用告警

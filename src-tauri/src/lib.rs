@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tauri::{Manager, WindowEvent};
 
 use crate::domain::detection::DesktopAgentRule;
+use crate::domain::terminal::TerminalAgentRule;
 use adapters::clock::SystemClock;
 use adapters::id::UuidGenerator;
 use adapters::sqlite::SqliteDatabase;
@@ -20,9 +21,13 @@ use adapters::sqlite_hotkey_settings::SqliteHotkeySettingsRepository;
 use adapters::tauri_global_shortcut::TauriGlobalShortcutAdapter;
 use adapters::tauri_window_manager::TauriWindowManager;
 use adapters::windows_foreground::WindowsForegroundContextProvider;
+use adapters::windows_process_tree::WindowsProcessTreeProvider;
 use application::agents::AgentService;
 use application::detection::{DesktopAgentDetector, ForegroundWatcher};
 use application::hotkey::HotkeyRuntime;
+use application::terminal::{
+    TerminalAgentDetector, TerminalHostClassifier, WindowsTerminalContextProvider,
+};
 use application::tips::TipService;
 use application::windows::WindowApplicationService;
 use commands::agents::agent_list;
@@ -156,9 +161,40 @@ pub fn run() {
             let foreground_provider: Arc<dyn ports::foreground::ForegroundContextProviderPort> =
                 Arc::new(WindowsForegroundContextProvider::new("agent-tips.exe"));
             let detector = Arc::new(DesktopAgentDetector::new(detection_rules, "agent-tips.exe"));
+            let terminal_rules = vec![
+                TerminalAgentRule {
+                    agent_id: "codex",
+                    direct_executables: &["codex.exe"],
+                    wrapper_executables: &["node.exe", "bun.exe"],
+                    wrapper_command_markers: &["@openai/codex", "codex.js"],
+                    excluded_path_markers: &["OpenAI\\Codex\\bin"],
+                },
+                TerminalAgentRule {
+                    agent_id: "claude-code",
+                    direct_executables: &["claude.exe"],
+                    wrapper_executables: &["node.exe", "bun.exe"],
+                    wrapper_command_markers: &["@anthropic-ai/claude-code"],
+                    excluded_path_markers: &[],
+                },
+                TerminalAgentRule {
+                    agent_id: "opencode",
+                    direct_executables: &["opencode.exe"],
+                    wrapper_executables: &["node.exe", "bun.exe"],
+                    wrapper_command_markers: &["opencode"],
+                    excluded_path_markers: &["opencodex"],
+                },
+            ];
+            let terminal_detector = Arc::new(TerminalAgentDetector::new(terminal_rules));
+            let process_tree: Box<dyn ports::terminal::ProcessTreeProviderPort> =
+                Box::new(WindowsProcessTreeProvider::new());
+            let terminal_context: Arc<dyn ports::terminal::TerminalContextProviderPort> = Arc::new(
+                WindowsTerminalContextProvider::new(process_tree, TerminalHostClassifier::new()),
+            );
             let watcher = Arc::new(ForegroundWatcher::new(
                 foreground_provider,
                 detector,
+                terminal_context,
+                terminal_detector,
                 clock.clone(),
             ));
             watcher.start()?;

@@ -178,6 +178,35 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("Rust domain/application/ports 不依赖 Toolhelp / WMI（仅 adapter 可用）", () => {
+    const violations: string[] = [];
+    for (const layer of ["domain", "application", "ports"]) {
+      for (const file of listRustFiles(join(srcTauri, "src", layer))) {
+        const content = readFileSync(file, "utf8");
+        for (const forbidden of [
+          "CreateToolhelp32Snapshot",
+          "WmiMonitor",
+          "root\\wmi",
+          "TH32CS_SNAPPROCESS",
+        ]) {
+          if (content.includes(forbidden)) {
+            violations.push(`${relative(root, file)} -> ${forbidden}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Terminal 检测仅存在于 Rust（feature 无进程/命令行读取）", () => {
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      expect(content).not.toMatch(
+        /CreateToolhelp32Snapshot|QueryFullProcessImageName|Process32FirstW|Win32_Process/,
+      );
+    }
+  });
+
   it("DesktopApi 暴露 getDesktopDetectionStatus 且 feature 不承担 detection", () => {
     const contract = readFileSync(join(src, "desktop-api", "contract.ts"), "utf8");
     expect(contract).toContain("getDesktopDetectionStatus");

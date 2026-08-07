@@ -116,6 +116,8 @@ export interface DesktopDetectionStatus {
   agentId: string | null;
   processName: string | null;
   matchKind: string | null;
+  source: string | null;
+  terminalStatus: string | null;
   effectiveExternalAgent: string | null;
   observedAt: string | null;
 }

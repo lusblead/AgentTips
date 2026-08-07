@@ -754,6 +754,8 @@ export class MockDesktopApi implements DesktopApi {
       agentId: null,
       processName: "mock-browser.exe",
       matchKind: null,
+      source: "Desktop",
+      terminalStatus: null,
       effectiveExternalAgent: null,
       observedAt: FIXED_NOW,
     };

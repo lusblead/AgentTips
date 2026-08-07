@@ -12,6 +12,8 @@ pub struct DesktopDetectionStatusDto {
     pub agent_id: Option<String>,
     pub process_name: Option<String>,
     pub match_kind: Option<String>,
+    pub source: Option<String>,
+    pub terminal_status: Option<String>,
     pub effective_external_agent: Option<String>,
     pub observed_at: Option<String>,
 }
@@ -41,6 +43,8 @@ pub fn desktop_detection_get_current(
         // processName 为最近前台进程 basename（隐私安全）
         process_name: state.last_process_basename,
         match_kind,
+        source: state.source,
+        terminal_status: state.terminal_status,
         effective_external_agent: state.effective_external_agent,
         observed_at: state.last_observed_at.map(|t| t.to_rfc3339()),
     }
@@ -52,6 +56,8 @@ fn match_kind_name(kind: &MatchKind) -> &'static str {
         MatchKind::ExecutableAndPath => "ExecutableAndPath",
         MatchKind::ExecutableAndClass => "ExecutableAndClass",
         MatchKind::VerifiedApplicationIdentity => "VerifiedApplicationIdentity",
+        MatchKind::TerminalDirectExecutable => "TerminalDirectExecutable",
+        MatchKind::TerminalWrapperCommand => "TerminalWrapperCommand",
     }
 }
 

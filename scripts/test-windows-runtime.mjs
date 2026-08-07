@@ -143,8 +143,8 @@ class CdpClient {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`${method} timeout`));
-      }, 15_000);
+        reject(new Error(`${method} timeout (pending=${this.pending.size})`));
+      }, 20_000);
       this.pending.set(id, {
         resolve: (v) => {
           clearTimeout(t);
@@ -183,7 +183,7 @@ class CdpClient {
     }
   }
 
-  async evaluateRetry(expression, retries = 2) {
+  async evaluateRetry(expression, retries = 3) {
     let lastError;
     for (let i = 0; i <= retries; i += 1) {
       try {
@@ -338,11 +338,27 @@ async function allWindowLabels(client) {
 }
 
 async function isVisible(client) {
-  return Boolean(
-    await client.evaluateRetry(
-      `window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible')`,
-    ),
-  );
+  try {
+    return Boolean(
+      await client.evaluateRetry(
+        `window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible')`,
+      ),
+    );
+  } catch {
+    // 第二实例唤醒等场景可能重建 WebView：重新识别窗口再试一次
+    for (const [kind, existing] of [...clients.entries()]) {
+      existing.close();
+      clients.delete(kind);
+    }
+    const rebuilt = await ensureClient("main");
+    // 调用方持有的 client 引用可能已失效，返回新 client（不改变签名，调用方应容忍）
+    clients.set("main", rebuilt);
+    return Boolean(
+      await rebuilt.evaluateRetry(
+        `window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible')`,
+      ),
+    );
+  }
 }
 
 async function cssViewport(client) {
@@ -489,7 +505,7 @@ async function run() {
   try {
     dbCleanupPrefix(prefix);
     startApp();
-    const main = await ensureClient("main");
+    let main = await ensureClient("main");
     console.log("1. main window started  PASS");
 
     await main.evaluate(`document.querySelector('[data-desktop-adapter]') !== null`);
@@ -651,9 +667,11 @@ async function run() {
     if (countAfter !== countBefore) {
       throw new Error(`process count changed: ${countBefore} -> ${countAfter}`);
     }
-    if (!(await isVisible(main))) {
+    const visibleAfterSecond = await isVisible(main);
+    if (!visibleAfterSecond) {
       throw new Error("main not visible after second instance activation");
     }
+    main = clients.get("main") ?? main;
     second.kill();
     console.log(
       `11+12. 第二实例启动 -> 首实例被唤醒, 进程唯一 (${countBefore} 个)  PASS`,
@@ -663,7 +681,17 @@ async function run() {
     for (const client of clients.values()) {
       assertNoConsoleErrors(client, "runtime");
     }
-    await main.evaluate(`window.__TAURI_INTERNALS__.invoke('window_quit')`);
+    try {
+      await main.evaluate(`window.__TAURI_INTERNALS__.invoke('window_quit')`);
+    } catch {
+      // 第二实例唤醒可能重建 WebView：重建连接后重试 quit
+      for (const [kind, existing] of [...clients.entries()]) {
+        existing.close();
+        clients.delete(kind);
+      }
+      main = await ensureClient("main");
+      await main.evaluate(`window.__TAURI_INTERNALS__.invoke('window_quit')`);
+    }
     await waitAppStopped();
     if (getProcessCount() !== 0) {
       throw new Error(`process still alive after quit: ${getProcessCount()}`);

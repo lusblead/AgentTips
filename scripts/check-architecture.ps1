@@ -149,6 +149,18 @@ foreach ($layer in $windowsBoundaryLayers) {
     }
 }
 
+# 15. Rust domain/application/ports 不得依赖 Toolhelp/WMI（仅 adapter）
+$processBoundaryLayers = @("domain", "application", "ports")
+foreach ($layer in $processBoundaryLayers) {
+    $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+    foreach ($file in $layerFiles) {
+        $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+        if ($content -match 'CreateToolhelp32Snapshot|TH32CS_SNAPPROCESS|Win32_Process|WmiMonitor') {
+            $failures += "$layer 依赖进程/WMI API: $($file.FullName)"
+        }
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "check-architecture: FAIL"
     $failures | ForEach-Object { Write-Host "  - $_" }

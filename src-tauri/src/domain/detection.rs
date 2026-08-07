@@ -21,6 +21,8 @@ pub enum MatchKind {
     ExecutableAndPath,
     ExecutableAndClass,
     VerifiedApplicationIdentity,
+    TerminalDirectExecutable,
+    TerminalWrapperCommand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

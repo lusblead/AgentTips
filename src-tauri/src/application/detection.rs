@@ -6,14 +6,17 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::application::terminal::TerminalAgentDetector;
 use crate::domain::detection::{
     executable_matches_rule, normalize_path, reduce_transition, DesktopAgentRule, DetectionResult,
     MatchKind, Transition,
 };
 use crate::domain::foreground::{ForegroundContext, ForegroundObservation};
+use crate::domain::terminal::{TerminalHostKind, TerminalObservation};
 use crate::error::{AppError, AppResult};
 use crate::ports::clock::Clock;
 use crate::ports::foreground::ForegroundContextProviderPort;
+use crate::ports::terminal::TerminalContextProviderPort;
 
 /// 前台轮询间隔（低成本：仅 HWND 检查）。
 pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -117,16 +120,23 @@ pub struct DesktopDetectionRuntimeState {
     pub last_observed_at: Option<DateTime<Utc>>,
     /// 最近观测的前台进程 basename（隐私安全：不含完整路径/标题）。
     pub last_process_basename: Option<String>,
+    /// 检测来源：Desktop 或 Terminal。
+    pub source: Option<String>,
+    /// Terminal 状态（terminal_resolved / terminal_no_agent / TERMINAL_SESSION_AMBIGUOUS 等）。
+    pub terminal_status: Option<String>,
 }
 
 /// 前台 watcher：低成本 polling，HWND 不变则跳过，变化才全量采集。
 pub struct ForegroundWatcher {
     provider: Arc<dyn ForegroundContextProviderPort>,
     detector: Arc<DesktopAgentDetector>,
+    terminal_context: Arc<dyn TerminalContextProviderPort>,
+    terminal_detector: Arc<TerminalAgentDetector>,
     clock: Arc<dyn Clock>,
     state: Arc<Mutex<DesktopDetectionRuntimeState>>,
     last_hwnd: Arc<Mutex<u64>>,
     last_hwnd_seen_at: Arc<Mutex<Option<DateTime<Utc>>>>,
+    last_terminal_status: Arc<Mutex<Option<String>>>,
     running: Arc<AtomicBool>,
     handle: Mutex<Option<JoinHandle<()>>>,
 }
@@ -135,11 +145,15 @@ impl ForegroundWatcher {
     pub fn new(
         provider: Arc<dyn ForegroundContextProviderPort>,
         detector: Arc<DesktopAgentDetector>,
+        terminal_context: Arc<dyn TerminalContextProviderPort>,
+        terminal_detector: Arc<TerminalAgentDetector>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             provider,
             detector,
+            terminal_context,
+            terminal_detector,
             clock,
             state: Arc::new(Mutex::new(DesktopDetectionRuntimeState {
                 current_detection: None,
@@ -147,9 +161,12 @@ impl ForegroundWatcher {
                 last_transition: None,
                 last_observed_at: None,
                 last_process_basename: None,
+                source: None,
+                terminal_status: None,
             })),
             last_hwnd: Arc::new(Mutex::new(0)),
             last_hwnd_seen_at: Arc::new(Mutex::new(None)),
+            last_terminal_status: Arc::new(Mutex::new(None)),
             running: Arc::new(AtomicBool::new(false)),
             handle: Mutex::new(None),
         }
@@ -189,59 +206,118 @@ impl ForegroundWatcher {
         {
             let mut last = self.last_hwnd.lock().unwrap();
             let mut seen = self.last_hwnd_seen_at.lock().unwrap();
-            if *last == hwnd {
-                if let Some(seen_at) = *seen {
-                    if now.signed_duration_since(seen_at)
-                        < chrono::Duration::from_std(RESYNC_INTERVAL).unwrap_or_default()
-                    {
-                        return Ok(());
-                    }
-                }
+            let is_terminal = matches!(
+                self.terminal_host_kind(observation.context()),
+                TerminalHostKind::WindowsTerminal | TerminalHostKind::ConsoleHost
+            );
+            // Terminal 前台时约 1s 刷新（进程树内容可能变化）；否则 HWND 变化才刷新
+            let refresh_needed = if is_terminal {
+                let since = seen
+                    .map(|s| now.signed_duration_since(s))
+                    .unwrap_or(chrono::Duration::seconds(5));
+                since >= chrono::Duration::milliseconds(1000)
+            } else {
+                *last != hwnd
+            };
+            if refresh_needed {
+                *last = hwnd;
                 *seen = Some(now);
+            } else {
                 return Ok(());
             }
-            *last = hwnd;
-            *seen = Some(now);
         }
 
         let result = self.detector.detect(&observation);
+        let final_result = self.resolve_terminal_if_needed(&result, observation.context())?;
         let mut state = self.state.lock().unwrap();
         state.last_process_basename = observation
             .context()
             .and_then(|c| c.executable_name.clone());
         let (new_effective, transition) =
-            reduce_transition(state.effective_external_agent.clone(), &result);
-        state.current_detection = Some(result.clone());
+            reduce_transition(state.effective_external_agent.clone(), &final_result);
+        state.current_detection = Some(final_result.clone());
         state.effective_external_agent = new_effective.clone();
         if transition != Transition::None {
             state.last_transition = Some(transition.clone());
         }
         state.last_observed_at = Some(now);
+        state.source = Some(match final_result {
+            DetectionResult::Matched { .. } => "Terminal".into(),
+            _ => "Desktop".into(),
+        });
+        state.terminal_status = self.last_terminal_status.lock().unwrap().clone();
 
         if transition != Transition::None {
             let basename = observation
                 .context()
                 .and_then(|c| c.executable_name.as_deref())
                 .unwrap_or("<none>");
-            let kind = match &result {
+            let kind = match &final_result {
                 DetectionResult::Matched { match_kind, .. } => format!("{:?}", match_kind),
                 _ => String::new(),
             };
             eprintln!(
-                "[agenttips] desktop_detection_changed transition={:?} process_basename={} match_kind={}",
+                "[agenttips] agent_detection_changed transition={:?} process_basename={} match_kind={}",
                 transition, basename, kind,
             );
         }
         Ok(())
     }
 
+    fn terminal_host_kind(&self, context: Option<&ForegroundContext>) -> TerminalHostKind {
+        context
+            .map(|ctx| self.terminal_context.classify(ctx))
+            .unwrap_or(TerminalHostKind::NotTerminal)
+    }
+
+    fn resolve_terminal_if_needed(
+        &self,
+        desktop_result: &DetectionResult,
+        context: Option<&ForegroundContext>,
+    ) -> AppResult<DetectionResult> {
+        *self.last_terminal_status.lock().unwrap() = None;
+        match desktop_result {
+            DetectionResult::NoMatch => {
+                let Some(ctx) = context else {
+                    return Ok(DetectionResult::NoMatch);
+                };
+                match self.terminal_context.observe(ctx)? {
+                    TerminalObservation::Resolved { candidates, .. } => {
+                        let detected = self.terminal_detector.detect(&candidates);
+                        if detected == DetectionResult::NoMatch {
+                            *self.last_terminal_status.lock().unwrap() =
+                                Some("terminal_no_agent".to_string());
+                            return Ok(DetectionResult::NoMatch);
+                        }
+                        *self.last_terminal_status.lock().unwrap() =
+                            Some("terminal_resolved".to_string());
+                        Ok(detected)
+                    }
+                    TerminalObservation::NoTerminalAgent => Ok(DetectionResult::NoMatch),
+                    TerminalObservation::Ambiguous { reason } => {
+                        *self.last_terminal_status.lock().unwrap() = Some(reason.clone());
+                        Ok(DetectionResult::Unavailable { reason })
+                    }
+                    TerminalObservation::Unavailable { reason } => {
+                        *self.last_terminal_status.lock().unwrap() = Some(reason.clone());
+                        Ok(DetectionResult::Unavailable { reason })
+                    }
+                }
+            }
+            _ => Ok(desktop_result.clone()),
+        }
+    }
+
     fn spawn_worker(&self) -> AppResult<JoinHandle<()>> {
         let provider = self.provider.clone();
         let detector = self.detector.clone();
+        let terminal_context = self.terminal_context.clone();
+        let terminal_detector = self.terminal_detector.clone();
         let clock = self.clock.clone();
         let state = self.state.clone();
         let last_hwnd = self.last_hwnd.clone();
         let last_seen = self.last_hwnd_seen_at.clone();
+        let last_terminal_status = self.last_terminal_status.clone();
         let running = self.running.clone();
 
         std::thread::Builder::new()
@@ -261,33 +337,79 @@ impl ForegroundWatcher {
                     {
                         let mut last = last_hwnd.lock().unwrap();
                         let mut seen = last_seen.lock().unwrap();
-                        if *last == hwnd {
-                            if let Some(seen_at) = *seen {
-                                if now.signed_duration_since(seen_at)
-                                    < chrono::Duration::from_std(RESYNC_INTERVAL)
-                                        .unwrap_or_default()
-                                {
-                                    std::thread::sleep(POLL_INTERVAL);
-                                    continue;
-                                }
-                            }
+                        let is_terminal = observation
+                            .context()
+                            .map(|ctx| {
+                                matches!(
+                                    terminal_context.classify(ctx),
+                                    TerminalHostKind::WindowsTerminal
+                                        | TerminalHostKind::ConsoleHost
+                                )
+                            })
+                            .unwrap_or(false);
+                        let refresh_needed = if is_terminal {
+                            let since = seen
+                                .map(|s| now.signed_duration_since(s))
+                                .unwrap_or(chrono::Duration::seconds(5));
+                            since >= chrono::Duration::milliseconds(1000)
+                        } else {
+                            *last != hwnd
+                        };
+                        if refresh_needed {
+                            *last = hwnd;
                             *seen = Some(now);
+                        } else {
                             std::thread::sleep(POLL_INTERVAL);
                             continue;
                         }
-                        *last = hwnd;
-                        *seen = Some(now);
                     }
 
-        let result = detector.detect(&observation);
-        let mut state = state.lock().unwrap();
-        state.last_process_basename = observation
-            .context()
-            .and_then(|c| c.executable_name.clone());
-        let (new_effective, transition) =
-                        reduce_transition(state.effective_external_agent.clone(), &result);
-                    state.current_detection = Some(result.clone());
+                    let result = detector.detect(&observation);
+                    let mut final_result = result;
+                    let mut terminal_status = None;
+                    if matches!(final_result, DetectionResult::NoMatch) {
+                        if let Some(ctx) = observation.context() {
+                            match terminal_context.observe(ctx) {
+                                Ok(TerminalObservation::Resolved { candidates, .. }) => {
+                                    let detected = terminal_detector.detect(&candidates);
+                                    if detected == DetectionResult::NoMatch {
+                                        terminal_status = Some("terminal_no_agent".to_string());
+                                    } else {
+                                        terminal_status =
+                                            Some("terminal_resolved".to_string());
+                                        final_result = detected;
+                                    }
+                                }
+                                Ok(TerminalObservation::NoTerminalAgent) => {}
+                                Ok(TerminalObservation::Ambiguous { reason }) => {
+                                    terminal_status = Some(reason.clone());
+                                    final_result = DetectionResult::Unavailable { reason };
+                                }
+                                Ok(TerminalObservation::Unavailable { reason }) => {
+                                    terminal_status = Some(reason.clone());
+                                    final_result = DetectionResult::Unavailable { reason };
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                    *last_terminal_status.lock().unwrap() = terminal_status.clone();
+
+                    let mut state = state.lock().unwrap();
+                    state.last_process_basename = observation
+                        .context()
+                        .and_then(|c| c.executable_name.clone());
+                    let (new_effective, transition) =
+                        reduce_transition(state.effective_external_agent.clone(), &final_result);
+                    state.current_detection = Some(final_result.clone());
                     state.effective_external_agent = new_effective.clone();
+                    state.source = Some(
+                        match final_result {
+                            DetectionResult::Matched { .. } => "Terminal".into(),
+                            _ => "Desktop".into(),
+                        },
+                    );
+                    state.terminal_status = terminal_status.clone();
                     if transition != Transition::None {
                         state.last_transition = Some(transition.clone());
                     }
@@ -297,14 +419,14 @@ impl ForegroundWatcher {
                             .context()
                             .and_then(|c| c.executable_name.as_deref())
                             .unwrap_or("<none>");
-                        let kind = match &result {
+                        let kind = match &final_result {
                             DetectionResult::Matched { match_kind, .. } => {
                                 format!("{:?}", match_kind)
                             }
                             _ => String::new(),
                         };
                         eprintln!(
-                            "[agenttips] desktop_detection_changed transition={:?} process_basename={} match_kind={}",
+                            "[agenttips] agent_detection_changed transition={:?} process_basename={} match_kind={}",
                             transition, basename, kind,
                         );
                     }
@@ -318,9 +440,30 @@ impl ForegroundWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::terminal::TerminalAgentDetector;
     use crate::domain::detection::MatchKind;
     use crate::domain::foreground::ForegroundContext;
+    use crate::domain::terminal::{TerminalHostKind, TerminalObservation};
+    use crate::ports::terminal::TerminalContextProviderPort;
     use std::sync::Mutex as StdMutex;
+
+    struct FakeTerminalContext {
+        host: TerminalHostKind,
+        observation: TerminalObservation,
+    }
+
+    impl TerminalContextProviderPort for FakeTerminalContext {
+        fn classify(&self, _context: &ForegroundContext) -> TerminalHostKind {
+            self.host
+        }
+        fn observe(&self, _context: &ForegroundContext) -> AppResult<TerminalObservation> {
+            Ok(self.observation.clone())
+        }
+    }
+
+    fn noop_terminal_detector() -> TerminalAgentDetector {
+        TerminalAgentDetector::new(vec![])
+    }
 
     fn cursor_rule() -> DesktopAgentRule {
         DesktopAgentRule {
@@ -510,7 +653,17 @@ mod tests {
             vec![cursor_rule()],
             "agent-tips.exe",
         ));
-        ForegroundWatcher::new(provider, detector, clock)
+        let terminal_context = Arc::new(FakeTerminalContext {
+            host: TerminalHostKind::NotTerminal,
+            observation: TerminalObservation::NoTerminalAgent,
+        });
+        ForegroundWatcher::new(
+            provider,
+            detector,
+            terminal_context,
+            Arc::new(noop_terminal_detector()),
+            clock,
+        )
     }
 
     #[test]

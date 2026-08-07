@@ -39,6 +39,14 @@ pub struct AppState {
 }
 
 fn database_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // E2E 隔离：仅 debug/test 构建允许通过 AGENTTIPS_TEST_DATA_DIR 覆盖数据目录。
+    // Release 构建无条件忽略该变量，始终使用正常 app_data_dir（Windows Known Folder API）。
+    #[cfg(debug_assertions)]
+    let data_dir = match std::env::var_os("AGENTTIPS_TEST_DATA_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => app.path().app_data_dir()?,
+    };
+    #[cfg(not(debug_assertions))]
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
     Ok(data_dir.join("agenttips.sqlite3"))
@@ -110,7 +118,7 @@ pub fn run() {
                 .item(&quit)
                 .build()?;
 
-            tauri::tray::TrayIconBuilder::with_id("agenttips-tray")
+            let tray = tauri::tray::TrayIconBuilder::with_id("agenttips-tray")
                 .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&menu)
                 .show_menu_on_left_click(true)
@@ -134,6 +142,8 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            // 持有 tray 引用，确保图标在应用生命周期内常驻系统托盘
+            app.manage(tray);
 
             Ok(())
         })

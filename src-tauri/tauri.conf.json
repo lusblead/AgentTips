@@ -23,11 +23,6 @@
         "center": true
       }
     ],
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": false,
-      "showMenuOnLeftClick": true
-    },
     "security": {
       "csp": null
     }

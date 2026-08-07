@@ -10,39 +10,23 @@
  *   pnpm test:tauri-ui
  */
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createWriteStream, rmSync } from "node:fs";
 import { join } from "node:path";
+import { makeLogDir, makeTestDataDir, killProcessTree, sleep, waitFor } from "./lib/runtime-test-utils.mjs";
 
 const CDP_PORT = 9222;
 const CDP_ENDPOINT = `http://127.0.0.1:${CDP_PORT}/json/list`;
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+/** E2E 隔离：所有测试写入独立 app data 目录，绝不触碰真实用户数据库 */
+const TEST_DATA_DIR = makeTestDataDir("tauri-ui");
 let appProcess = null;
 let logFiles = null;
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitFor(predicate, { timeout = 60_000, interval = 250, label = "condition" } = {}) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    try {
-      if (await predicate()) {
-        return true;
-      }
-    } catch {
-      /* retry */
-    }
-    await sleep(interval);
-  }
-  throw new Error(`等待超时: ${label}`);
-}
 
 function runPython(code) {
   const result = spawnSync("python", ["-X", "utf8", "-c", code], {
     encoding: "utf8",
     timeout: 30_000,
+    env: { ...process.env, AGENTTIPS_TEST_DATA_DIR: TEST_DATA_DIR },
   });
   if (result.status !== 0) {
     throw new Error(`python 执行失败: ${result.stderr}`);
@@ -54,7 +38,10 @@ function sqliteDeleteByTitle(title, prefix) {
   const code = `
 import sqlite3, os
 from datetime import datetime, timezone
-db = os.path.join(os.environ['APPDATA'], 'com.agenttips.app', 'agenttips.sqlite3')
+db = os.path.join(os.environ['AGENTTIPS_TEST_DATA_DIR'], 'agenttips.sqlite3')
+if not os.path.exists(db):
+    print(0)
+    raise SystemExit
 conn = sqlite3.connect(db)
 cur = conn.cursor()
 rows = cur.execute("SELECT id FROM tips WHERE title LIKE ? AND deleted_at IS NULL", ('${prefix}%',)).fetchall()
@@ -72,7 +59,10 @@ conn.close()
 function sqliteAssertClean(prefix) {
   const code = `
 import sqlite3, os
-db = os.path.join(os.environ['APPDATA'], 'com.agenttips.app', 'agenttips.sqlite3')
+db = os.path.join(os.environ['AGENTTIPS_TEST_DATA_DIR'], 'agenttips.sqlite3')
+if not os.path.exists(db):
+    print("0|0")
+    raise SystemExit
 conn = sqlite3.connect(db)
 cur = conn.cursor()
 alive = cur.execute("SELECT COUNT(*) FROM tips WHERE title LIKE ? AND deleted_at IS NULL", ('${prefix}%',)).fetchone()[0]
@@ -94,7 +84,10 @@ function sqliteCleanupPrefix(prefix) {
   const code = `
 import sqlite3, os
 from datetime import datetime, timezone
-db = os.path.join(os.environ['APPDATA'], 'com.agenttips.app', 'agenttips.sqlite3')
+db = os.path.join(os.environ['AGENTTIPS_TEST_DATA_DIR'], 'agenttips.sqlite3')
+if not os.path.exists(db):
+    print(0)
+    raise SystemExit
 conn = sqlite3.connect(db)
 cur = conn.cursor()
 rows = cur.execute("SELECT id FROM tips WHERE title LIKE ?", ('${prefix}%',)).fetchall()
@@ -262,12 +255,14 @@ class CdpClient {
 }
 
 function startApp() {
+  logFiles = makeLogDir("tauri-ui");
   const stdoutFile = join(logFiles, "tauri-ui.stdout.log");
   const stderrFile = join(logFiles, "tauri-ui.stderr.log");
   const child = spawn("pnpm.cmd", ["tauri", "dev"], {
     cwd: ROOT,
     env: {
       ...process.env,
+      AGENTTIPS_TEST_DATA_DIR: TEST_DATA_DIR,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -283,11 +278,7 @@ function stopApp() {
   if (!appProcess) {
     return;
   }
-  try {
-    spawnSync("taskkill", ["/pid", String(appProcess.pid), "/T", "/F"], { stdio: "ignore" });
-  } catch {
-    /* ignore */
-  }
+  killProcessTree(appProcess.pid);
   appProcess = null;
 }
 
@@ -422,33 +413,50 @@ async function clickByAria(client, label) {
 }
 
 async function pickAgent(client, agentName) {
-  // 找到"添加 Agent"按钮并用真实鼠标点击
-  const found = await client.evaluate(`(() => {
-    const buttons = [...document.querySelectorAll('button')];
-    const target = buttons.find((b) => (b.textContent ?? '').includes('添加 Agent') && !b.disabled);
-    if (!target) return false;
-    target.dataset.pickAgent = '1';
-    return true;
-  })()`);
-  if (!found) {
-    throw new Error("未找到添加 Agent 按钮");
-  }
-  await realClick(client, 'button[data-pick-agent="1"]');
-  try {
+  // 竞态根因：Quick Note reset 后 React 尚未完成渲染，测试过早点击。
+  // 正确流程：等待 reset 完成（按钮可见且 enabled）→ 重新获取最新 DOM →
+  // 点击一次 → 等待菜单项；失败则关闭菜单、重新定位，最多重试 2 次。
+  for (let attempt = 0; attempt <= 2; attempt += 1) {
     await client.waitForExpression(
-      `[...document.querySelectorAll('[role="menuitem"]')].some((el) => (el.textContent ?? '').includes(${JSON.stringify(agentName)}))`,
-      `菜单项 ${agentName}`,
+      `(() => {
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => (b.textContent ?? '').includes('添加 Agent') && !b.disabled,
+        );
+        return !!btn;
+      })()`,
+      `添加 Agent 按钮就绪`,
       5_000,
     );
-    } catch (error) {
-      const diag = await client.evaluate(
-      `JSON.stringify({
-        buttons: [...document.querySelectorAll('button')].map((b) => b.textContent.trim()).slice(0, 8),
-        menuitems: [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent.trim()),
-        body: document.body.textContent.slice(0, 200),
-      })`,
-    );
-      throw new Error(`菜单项 ${agentName} 未出现: ${diag}`, { cause: error });
+    const found = await client.evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('button')];
+      const target = buttons.find((b) => (b.textContent ?? '').includes('添加 Agent') && !b.disabled);
+      if (!target) return false;
+      target.dataset.pickAgent = '1';
+      return true;
+    })()`);
+    if (!found) throw new Error("未找到添加 Agent 按钮");
+    await realClick(client, 'button[data-pick-agent="1"]');
+    try {
+      await client.waitForExpression(
+        `[...document.querySelectorAll('[role="menuitem"]')].some((el) => (el.textContent ?? '').includes(${JSON.stringify(agentName)}))`,
+        `菜单项 ${agentName}`,
+        3_000,
+      );
+      break;
+    } catch {
+      await client.evaluate(`document.body.click()`);
+      await sleep(400);
+      if (attempt === 2) {
+        const diag = await client.evaluate(
+          `JSON.stringify({
+            buttons: [...document.querySelectorAll('button')].map((b) => b.textContent.trim()).slice(0, 8),
+            menuitems: [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent.trim()),
+            body: document.body.textContent.slice(0, 200),
+          })`,
+        );
+        throw new Error(`菜单项 ${agentName} 未出现: ${diag}`);
+      }
+    }
   }
   const ok = await client.evaluate(`(() => {
     const items = [...document.querySelectorAll('[role="menuitem"]')];
@@ -474,12 +482,18 @@ async function setSwitch(client, label, checked) {
     `Boolean(document.querySelector('[aria-label=${JSON.stringify(label)}]'))`,
     `开关 ${label}`,
   );
-  const current = await switchValue(client, label);
-  if (String(current) !== String(checked)) {
+  // 目标式切换：已等于目标直接返回；否则只点击一次并等待，最多一轮重试。
+  let after = await switchValue(client, label);
+  if (String(after) !== String(checked)) {
     await clickByLabel(client, label);
-    await sleep(100);
+    await sleep(200);
+    after = await switchValue(client, label);
+    if (String(after) !== String(checked)) {
+      await clickByLabel(client, label);
+      await sleep(200);
+      after = await switchValue(client, label);
+    }
   }
-  const after = await switchValue(client, label);
   if (String(after) !== String(checked)) {
     throw new Error(`开关 ${label} 未切换为 ${checked}`);
   }
@@ -493,6 +507,10 @@ async function openTipByTitle(client, title) {
     await clickByLabel(client, "搜索");
   }
   await setInput(client, "搜索便签", title);
+  // 主窗口列表刷新依赖 window focus 事件；跨窗口新建 Tip 后主窗口可能未
+  // 获得真实焦点变化，这里显式触发一次刷新，避免依赖 OS 前台时序。
+  await client.evaluate(`window.dispatchEvent(new Event('focus'))`);
+  await sleep(300);
   await client.waitForExpression(
     `[...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].some((b) => (b.querySelector('input[aria-label="标题"]')?.value ?? '') === ${JSON.stringify(title)})`,
     `卡片 ${title}`,
@@ -540,7 +558,6 @@ function assertNoConsoleErrors(client, phase) {
 }
 
 async function run() {
-  logFiles = mkdtempSync(join(tmpdir(), "agenttips-tauri-ui-"));
   const titlePrefix = "垂直链路UI";
   const uniqueTitle = `${titlePrefix}-${Date.now()}`;
   const updatedContent = `${uniqueTitle} 修改后正文`;
@@ -904,6 +921,7 @@ async function run() {
     stopApp();
     await waitAppStopped().catch(() => {});
     rmSync(logFiles, { recursive: true, force: true });
+    rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   }
 }
 

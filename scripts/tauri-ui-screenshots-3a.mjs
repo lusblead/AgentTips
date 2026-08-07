@@ -13,40 +13,26 @@
  * 截图后对每张图做像素统计（尺寸/非空白/颜色数），并断言 quick-note 不是 main 尺寸。
  */
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createWriteStream, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeLogDir, makeTestDataDir, killProcessTree, sleep, waitFor } from "./lib/runtime-test-utils.mjs";
 
 const CDP_PORT = 9233;
 const CDP_ENDPOINT = `http://127.0.0.1:${CDP_PORT}/json/list`;
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUT_DIR = join(ROOT, "artifacts", "screenshots", "phase-3a");
+/** 截图脚本使用独立 app data 目录，不触碰真实用户数据库 */
+const TEST_DATA_DIR = makeTestDataDir("screenshots-3a");
 
 let appProcess = null;
 let logDir = null;
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitFor(predicate, { timeout = 60_000, interval = 250, label = "condition" } = {}) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    try {
-      if (await predicate()) return true;
-    } catch {
-      /* retry */
-    }
-    await sleep(interval);
-  }
-  throw new Error(`wait timeout: ${label}`);
-}
 
 function runPython(code) {
   const result = spawnSync("python", ["-X", "utf8", "-c", code], {
     encoding: "utf8",
     timeout: 60_000,
+    env: { ...process.env, AGENTTIPS_TEST_DATA_DIR: TEST_DATA_DIR },
   });
   if (result.status !== 0) throw new Error(`python failed: ${result.stderr}`);
   return result.stdout.trim();
@@ -55,7 +41,10 @@ function runPython(code) {
 function dbCleanupPrefix(prefix) {
   const code = `
 import sqlite3, os
-db = os.path.join(os.environ['APPDATA'], 'com.agenttips.app', 'agenttips.sqlite3')
+db = os.path.join(os.environ['AGENTTIPS_TEST_DATA_DIR'], 'agenttips.sqlite3')
+if not os.path.exists(db):
+    print(0)
+    raise SystemExit
 conn = sqlite3.connect(db)
 cur = conn.cursor()
 rows = cur.execute("SELECT id FROM tips WHERE title LIKE ?", ('${prefix}%',)).fetchall()
@@ -74,7 +63,7 @@ function seedDemoTips() {
   const code = `
 import sqlite3, os, uuid
 from datetime import datetime, timezone
-db = os.path.join(os.environ['APPDATA'], 'com.agenttips.app', 'agenttips.sqlite3')
+db = os.path.join(os.environ['AGENTTIPS_TEST_DATA_DIR'], 'agenttips.sqlite3')
 conn = sqlite3.connect(db)
 cur = conn.cursor()
 agents = [r[0] for r in cur.execute("SELECT id FROM agents ORDER BY name LIMIT 3").fetchall()]
@@ -328,13 +317,13 @@ async function run() {
   const filledPrefix = "截图填写";
   dbCleanupPrefix(prefix);
   dbCleanupPrefix(filledPrefix);
-  seedDemoTips();
 
-  logDir = mkdtempSync(join(tmpdir(), "agenttips-shots3a-"));
+  logDir = makeLogDir("screenshots-3a");
   const child = spawn("pnpm.cmd", ["tauri", "dev"], {
     cwd: ROOT,
     env: {
       ...process.env,
+      AGENTTIPS_TEST_DATA_DIR: TEST_DATA_DIR,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -346,6 +335,9 @@ async function run() {
 
   try {
     const main = await ensureClient("main");
+    // 应用首次启动已执行 migration，此时再写入演示数据
+    seedDemoTips();
+    await openWindow("main");
     await waitFor(
       async () =>
         (await main.evaluate(
@@ -465,14 +457,11 @@ async function run() {
   } finally {
     for (const client of clients.values()) client.close();
     clients.clear();
-    try {
-      if (appProcess) spawnSync("taskkill", ["/pid", String(appProcess.pid), "/T", "/F"], { stdio: "ignore" });
-    } catch {
-      /* ignore */
-    }
+    if (appProcess) killProcessTree(appProcess.pid);
     if (logDir) rmSync(logDir, { recursive: true, force: true });
     dbCleanupPrefix(prefix);
     dbCleanupPrefix(filledPrefix);
+    rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   }
 }
 

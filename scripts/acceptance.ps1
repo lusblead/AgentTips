@@ -2,6 +2,15 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+$userDbSnapshot = Join-Path $env:TEMP "agenttips-user-db-snapshot.json"
+
+# 正式用户数据库保护：验收开始前快照，结束后校验 checksum/mtime 未被测试修改
+node scripts/check-user-db-untouched.mjs --snapshot $userDbSnapshot
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "FAIL: user db snapshot"
+    exit 1
+}
+
 $steps = @(
     @{ Name = "pnpm install (frozen lockfile)"; Command = "pnpm install --frozen-lockfile" },
     @{ Name = "pnpm format:check"; Command = "pnpm format:check" },
@@ -33,6 +42,13 @@ foreach ($step in $steps) {
 if ($failed.Count -gt 0) {
     Write-Host "`nacceptance: FAIL"
     $failed | ForEach-Object { Write-Host "  - $_" }
+    exit 1
+}
+
+# 正式用户数据库未被任何测试修改
+node scripts/check-user-db-untouched.mjs --verify $userDbSnapshot
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nacceptance: FAIL (user db modified)"
     exit 1
 }
 

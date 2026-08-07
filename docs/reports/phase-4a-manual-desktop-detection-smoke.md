@@ -1,36 +1,57 @@
 # Phase 4A 人工 Desktop Detection Smoke 报告
 
 - 日期：2026-08-07
-- 状态：**PENDING USER MANUAL SMOKE** —— 工程实现与自动化运行时测试已完成，
-  以下逐项结果未经用户实机确认，不得视为 PASS。
+- 状态：**PASS — user manually verified desktop agent detection**
+  （Cursor / ChatGPT Desktop / Trae 正向命中；Microsoft Edge / Explorer /
+  Windows Terminal NoMatch；SelfWindow 语义不产生二次 Entered）
 
-## 目标应用
+## 正向目标（用户实机切换确认）
 
-| 目标            | 本机安装状态 | 自动化（真实前台 probe）                                                                                                | 人工结果 |
-| --------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- | -------- |
-| Cursor          | 已安装       | EXE=`Cursor.exe`、PATH=`%LOCALAPPDATA%\Programs\cursor\Cursor.exe`、CLASS=`Chrome_WidgetWin_1`（实测）                  | PENDING  |
-| ChatGPT Desktop | 已安装       | EXE=`ChatGPT.exe`、PATH=`%ProgramFiles%\WindowsApps\OpenAI.Codex_*\app\ChatGPT.exe`、CLASS=`Chrome_WidgetWin_1`（实测） | PENDING  |
-| Trae            | 已安装       | EXE=`Trae.exe`、PATH=`%LOCALAPPDATA%\Programs\Trae(In)\Trae.exe`、CLASS=`Chrome_WidgetWin_1`（实测）                    | PENDING  |
+| 目标            | raw     | agent           | process     | matchKind         | 结果 |
+| --------------- | ------- | --------------- | ----------- | ----------------- | ---- |
+| Cursor          | Matched | cursor          | Cursor.exe  | ExecutableAndPath | PASS |
+| ChatGPT Desktop | Matched | chatgpt-desktop | ChatGPT.exe | ExecutableAndPath | PASS |
+| Trae            | Matched | trae            | Trae.exe    | ExecutableAndPath | PASS |
 
 ## 非目标（应 NoMatch）
 
-| 目标             | 预期    | 自动化                                               | 人工结果 |
-| ---------------- | ------- | ---------------------------------------------------- | -------- |
-| Chrome           | NoMatch | Notepad 等价场景自动化 PASS（NoMatch + processName） | PENDING  |
-| Explorer         | NoMatch | 未自动验证                                           | PENDING  |
-| Windows Terminal | NoMatch | 未自动验证（Phase 4B 之前）                          | PENDING  |
+| 目标             | 实际进程            | raw            | 结果                                         |
+| ---------------- | ------------------- | -------------- | -------------------------------------------- |
+| Microsoft Edge   | msedge.exe          | NoMatch        | PASS                                         |
+| Windows Explorer | explorer.exe        | NoMatch        | PASS                                         |
+| Windows Terminal | WindowsTerminal.exe | NoMatch        | PASS                                         |
+| Chrome           | chrome.exe          | 本轮未实际观察 | **PENDING**（不得以 msedge.exe 冒充 Chrome） |
 
-## 需要人工验证的步骤
+## SelfWindow 关键语义（Cursor → Quick Note → Cursor）
 
-1. 前台切到 Cursor → `desktop_detection_get_current` 返回 Matched(Cursor)。
-2. 前台切到 ChatGPT Desktop → Matched(ChatGPT Desktop)。
-3. 前台切到 Trae → Matched(Trae)。
-4. 前台切到 Chrome → NoMatch。
-5. 前台切到 Explorer → NoMatch。
-6. 前台切到 Windows Terminal → NoMatch。
+1. Cursor foreground：
+   - raw：`Matched(cursor)`
+   - effective：`cursor`
+2. Hotkey 打开 Quick Note：
+   - raw：`SelfWindow`
+   - process：`agent-tips.exe`
+   - effective：`cursor`（保持）
+   - transition：`None`
+3. 返回 Cursor：
+   - raw：`Matched(cursor)`
+   - effective：`cursor`
+   - transition：`None`
 
-人工验证方式：任意应用前台时通过 Tauri 诊断命令或测试脚本查询
-`desktop_detection_get_current`，确认状态与上表一致。
+**结论：PASS — AgentTips SelfWindow does not clear or re-enter the effective
+external Cursor agent. Quick Note interruption did not produce a second
+Entered(cursor) transition.**
+
+权威依据：Rust 运行时 transition 日志中
+`process_basename=agent-tips.exe` 的 `desktop_detection_changed` 记录数为 0。
+
+## Known Notes
+
+- temporary observer could display stale previous transition;
+  authoritative runtime transition log was used for verification.
+  （临时观察器偶尔把旧 transition 与新 SelfWindow raw state 显示在同一行，
+  属采样竞态；最终判定以权威 Rust transition 日志为准。）
+- 本轮浏览器进程为 `msedge.exe`（Microsoft Edge），因此 Edge=NoMatch PASS；
+  Chrome 未在本轮观察到 `chrome.exe`，保持 PENDING。
 
 ## 自动化已覆盖
 

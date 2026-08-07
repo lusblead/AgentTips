@@ -25,7 +25,8 @@ $steps = @(
     @{ Name = "cargo test"; Command = "cargo test --manifest-path src-tauri/Cargo.toml" },
     @{ Name = "pnpm test:tauri-ui (real WebView UI chain)"; Command = "pnpm test:tauri-ui" },
     @{ Name = "pnpm test:windows-runtime (real multi-window lifecycle)"; Command = "pnpm test:windows-runtime" },
-    @{ Name = "pnpm test:global-hotkey (real global hotkey runtime)"; Command = "pnpm test:global-hotkey" }
+    @{ Name = "pnpm test:global-hotkey (real global hotkey runtime)"; Command = "pnpm test:global-hotkey" },
+    @{ Name = "pnpm test:desktop-detection (real foreground detection)"; Command = "pnpm test:desktop-detection" }
 )
 
 $failed = @()

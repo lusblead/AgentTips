@@ -8,6 +8,7 @@ import type {
   HotkeyCandidate,
   HotkeyPreviewResult,
   HotkeyRuntimeState,
+  DesktopDetectionStatus,
   MockFailureKind,
   NoteColorKey,
   QuickNoteResetPayload,
@@ -745,6 +746,17 @@ export class MockDesktopApi implements DesktopApi {
 
   async endHotkeyRecording(): Promise<void> {
     this.hotkeyCalls.push("end");
+  }
+
+  async getDesktopDetectionStatus(): Promise<DesktopDetectionStatus> {
+    return {
+      status: "NoMatch",
+      agentId: null,
+      processName: "mock-browser.exe",
+      matchKind: null,
+      effectiveExternalAgent: null,
+      observedAt: FIXED_NOW,
+    };
   }
 
   async getReminderPreview(): Promise<ReminderPreview> {

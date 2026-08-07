@@ -128,6 +128,22 @@ describe("TauriDesktopApi", () => {
     expect(invokeMock).toHaveBeenCalledWith("hotkey_recording_end");
   });
 
+  it("getDesktopDetectionStatus 转发到 desktop_detection_get_current", async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      status: "Matched",
+      agentId: "cursor",
+      processName: null,
+      matchKind: "ExecutableAndPath",
+      effectiveExternalAgent: "cursor",
+      observedAt: "2026-08-07T00:00:00Z",
+    });
+    const result = await api.getDesktopDetectionStatus();
+    expect(invokeMock).toHaveBeenCalledWith("desktop_detection_get_current");
+    expect(result.status).toBe("Matched");
+    expect(result.agentId).toBe("cursor");
+  });
+
   it("getReminderPreview 明确未实现", async () => {
     await expect(api.getReminderPreview()).rejects.toMatchObject({
       code: ERROR_CODES.INTERNAL_ERROR,

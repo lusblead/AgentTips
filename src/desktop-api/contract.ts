@@ -110,6 +110,16 @@ export interface HotkeyRuntimeState {
   registrationError: string | null;
 }
 
+/** 桌面 Agent 前台检测状态（安全 DTO：不含完整 path / window title）。 */
+export interface DesktopDetectionStatus {
+  status: "Matched" | "NoMatch" | "SelfWindow" | "Unavailable" | "Unknown";
+  agentId: string | null;
+  processName: string | null;
+  matchKind: string | null;
+  effectiveExternalAgent: string | null;
+  observedAt: string | null;
+}
+
 export interface AppSettings {
   theme: "system" | "light" | "dark";
   globalPause: boolean;
@@ -209,6 +219,7 @@ export interface DesktopApi {
   updateHotkey(input: HotkeyCandidate): Promise<HotkeyBinding>;
   beginHotkeyRecording(): Promise<void>;
   endHotkeyRecording(): Promise<void>;
+  getDesktopDetectionStatus(): Promise<DesktopDetectionStatus>;
 
   getReminderPreview(): Promise<ReminderPreview>;
 

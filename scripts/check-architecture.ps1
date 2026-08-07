@@ -137,6 +137,18 @@ foreach ($layer in $hotkeyBoundaryLayers) {
     }
 }
 
+# 14. Rust domain/application/ports 不得依赖 windows/windows-sys/winapi（仅 adapter）
+$windowsBoundaryLayers = @("domain", "application", "ports")
+foreach ($layer in $windowsBoundaryLayers) {
+    $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+    foreach ($file in $layerFiles) {
+        $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+        if ($content -match 'windows_sys|windows::|winapi') {
+            $failures += "$layer 依赖 Windows API: $($file.FullName)"
+        }
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "check-architecture: FAIL"
     $failures | ForEach-Object { Write-Host "  - $_" }

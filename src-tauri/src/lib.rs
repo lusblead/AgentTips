@@ -12,17 +12,21 @@ use std::sync::Arc;
 
 use tauri::{Manager, WindowEvent};
 
+use crate::domain::detection::DesktopAgentRule;
 use adapters::clock::SystemClock;
 use adapters::id::UuidGenerator;
 use adapters::sqlite::SqliteDatabase;
 use adapters::sqlite_hotkey_settings::SqliteHotkeySettingsRepository;
 use adapters::tauri_global_shortcut::TauriGlobalShortcutAdapter;
 use adapters::tauri_window_manager::TauriWindowManager;
+use adapters::windows_foreground::WindowsForegroundContextProvider;
 use application::agents::AgentService;
+use application::detection::{DesktopAgentDetector, ForegroundWatcher};
 use application::hotkey::HotkeyRuntime;
 use application::tips::TipService;
 use application::windows::WindowApplicationService;
 use commands::agents::agent_list;
+use commands::detection::desktop_detection_get_current;
 use commands::hotkey::{
     hotkey_get, hotkey_preview, hotkey_recording_begin, hotkey_recording_end, hotkey_update,
 };
@@ -124,6 +128,41 @@ pub fn run() {
             ));
             hotkey.startup()?;
 
+            // Desktop Agent Foreground Detection：
+            // 规则基于本机实测身份（docs/reports/phase-4a-desktop-agent-identities.md）
+            let detection_rules: Vec<DesktopAgentRule> = vec![
+                DesktopAgentRule {
+                    agent_id: "cursor",
+                    executable_basenames: &["Cursor.exe"],
+                    path_hints: &["programs\\cursor"],
+                    window_class_hints: &[],
+                    title_hints: &[],
+                },
+                DesktopAgentRule {
+                    agent_id: "chatgpt-desktop",
+                    executable_basenames: &["ChatGPT.exe"],
+                    path_hints: &["windowsapps\\openai.codex_"],
+                    window_class_hints: &[],
+                    title_hints: &[],
+                },
+                DesktopAgentRule {
+                    agent_id: "trae",
+                    executable_basenames: &["Trae.exe", "Trae CN.exe"],
+                    path_hints: &["programs\\trae"],
+                    window_class_hints: &[],
+                    title_hints: &[],
+                },
+            ];
+            let foreground_provider: Arc<dyn ports::foreground::ForegroundContextProviderPort> =
+                Arc::new(WindowsForegroundContextProvider::new("agent-tips.exe"));
+            let detector = Arc::new(DesktopAgentDetector::new(detection_rules, "agent-tips.exe"));
+            let watcher = Arc::new(ForegroundWatcher::new(
+                foreground_provider,
+                detector,
+                clock.clone(),
+            ));
+            watcher.start()?;
+
             app.manage(AppState {
                 tips,
                 agents,
@@ -131,6 +170,7 @@ pub fn run() {
                 is_quitting: is_quitting.clone(),
             });
             app.manage(hotkey);
+            app.manage(watcher);
 
             // 主窗口启动即创建并显示
             let _ = window_manager.show(WindowLabel::Main);
@@ -166,6 +206,9 @@ pub fn run() {
                             let _ = state.windows.open_settings();
                         }
                         "quit" => {
+                            if let Some(w) = app.try_state::<Arc<ForegroundWatcher>>() {
+                                let _ = w.stop();
+                            }
                             state.is_quitting.store(true, Ordering::Relaxed);
                             let _ = state.windows.quit();
                         }
@@ -195,6 +238,7 @@ pub fn run() {
             tip_restore_used,
             tip_update_color,
             agent_list,
+            desktop_detection_get_current,
             hotkey_get,
             hotkey_preview,
             hotkey_update,

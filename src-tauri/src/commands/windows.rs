@@ -1,8 +1,10 @@
 use tauri::State;
 
+use crate::application::detection::ForegroundWatcher;
 use crate::error::AppErrorDto;
 use crate::AppState;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 #[tauri::command]
 pub async fn window_open_main(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
@@ -41,7 +43,11 @@ pub async fn window_get_kind(
 }
 
 #[tauri::command]
-pub async fn window_quit(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
+pub async fn window_quit(
+    state: State<'_, AppState>,
+    watcher: State<'_, Arc<ForegroundWatcher>>,
+) -> Result<(), AppErrorDto> {
+    let _ = watcher.stop();
     state.is_quitting.store(true, Ordering::Relaxed);
     state.windows.quit().map_err(AppErrorDto::from)
 }

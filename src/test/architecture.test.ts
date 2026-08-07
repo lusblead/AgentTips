@@ -163,6 +163,33 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("Rust domain/application/ports 不依赖 windows / windows-sys / winapi（仅 adapter 可用）", () => {
+    const violations: string[] = [];
+    for (const layer of ["domain", "application", "ports"]) {
+      for (const file of listRustFiles(join(srcTauri, "src", layer))) {
+        const content = readFileSync(file, "utf8");
+        for (const forbidden of ["windows_sys", "windows::", "winapi"]) {
+          if (content.includes(forbidden)) {
+            violations.push(`${relative(root, file)} -> ${forbidden}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("DesktopApi 暴露 getDesktopDetectionStatus 且 feature 不承担 detection", () => {
+    const contract = readFileSync(join(src, "desktop-api", "contract.ts"), "utf8");
+    expect(contract).toContain("getDesktopDetectionStatus");
+    // feature 不得出现 Windows 进程/前台扫描类 API
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      expect(content).not.toMatch(
+        /GetForegroundWindow|QueryFullProcessImageName|enumerateProcesses|scanSystemProcesses/,
+      );
+    }
+  });
+
   it("HotkeyApplicationService 不依赖 TauriWindowManager", () => {
     const hotkeyApp = readFileSync(join(srcTauri, "src", "application", "hotkey.rs"), "utf8");
     expect(hotkeyApp).not.toMatch(/tauri_window_manager::|TauriWindowManager::/);

@@ -23,6 +23,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "thiserror 2.0.19",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -7,6 +7,7 @@ import {
   type CreateTipInput,
   type DesktopApi,
   type DesktopError,
+  type DesktopDetectionStatus,
   type HotkeyCandidate,
   type HotkeyBinding,
   type HotkeyPreviewResult,
@@ -268,6 +269,14 @@ export class TauriDesktopApi implements DesktopApi {
   async endHotkeyRecording(): Promise<void> {
     try {
       await invoke<void>("hotkey_recording_end");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getDesktopDetectionStatus(): Promise<DesktopDetectionStatus> {
+    try {
+      return await invoke<DesktopDetectionStatus>("desktop_detection_get_current");
     } catch (error) {
       throw toDesktopError(error);
     }

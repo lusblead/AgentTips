@@ -18,6 +18,7 @@
     "test:tauri-ui": "node scripts/tauri-ui-vertical-chain.mjs",
     "test:windows-runtime": "node scripts/test-windows-runtime.mjs",
     "test:global-hotkey": "node scripts/test-global-hotkey.mjs",
+    "test:desktop-detection": "node scripts/test-desktop-detection.mjs",
     "check:architecture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-architecture.ps1",
     "acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance.ps1"
   },

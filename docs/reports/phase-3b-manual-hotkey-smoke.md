@@ -16,6 +16,16 @@
 5. OLD Hotkey 立即失效：PASS
 6. AgentTips 退出重启后 NEW Hotkey 仍然生效：PASS
 
+## z-order 人工项（Quick Note 普通窗口层级）
+
+Hotkey 打开 Quick Note → 点击其他应用 → Quick Note 正常退到后面 → 再按 Hotkey →
+Quick Note 回到前台且草稿保留。
+
+状态：**PENDING USER MANUAL SMOKE** —— 该行为已由
+`pnpm test:global-hotkey` B/C/D 场景自动化验证（点击 Notepad 后 Quick Note
+非 topmost 且保留、再次 Hotkey 回前台草稿保留、最小化后 Hotkey 恢复聚焦），
+但用户尚未实机确认，不得虚构 PASS。
+
 ## 自动化已覆盖（供参考）
 
 `pnpm test:global-hotkey`（独立测试数据库）已验证：

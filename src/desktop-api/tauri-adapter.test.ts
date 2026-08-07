@@ -98,11 +98,34 @@ describe("TauriDesktopApi", () => {
     });
   });
 
-  it("previewHotkey 明确未实现", async () => {
-    await expect(api.previewHotkey({ modifier: "Ctrl", keyCode: "KeyK" })).rejects.toMatchObject({
-      code: ERROR_CODES.INTERNAL_ERROR,
-      message: /尚未实现/,
+  it("previewHotkey 转发到 hotkey_preview 并返回结果", async () => {
+    invokeMock.mockResolvedValue({ ok: true, binding: { modifier: "Ctrl", keyCode: "KeyK" } });
+    const result = await api.previewHotkey({ modifier: "Ctrl", keyCode: "KeyK" });
+    expect(invokeMock).toHaveBeenCalledWith("hotkey_preview", {
+      modifier: "Ctrl",
+      keyCode: "KeyK",
     });
+    expect(result.ok).toBe(true);
+  });
+
+  it("getHotkeySettings / updateHotkey / begin/endHotkeyRecording 调用正确 command", async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    await api.getHotkeySettings();
+    expect(invokeMock).toHaveBeenCalledWith("hotkey_get");
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ modifier: "Ctrl", keyCode: "F11" });
+    await api.updateHotkey({ modifier: "Ctrl", keyCode: "F11" });
+    expect(invokeMock).toHaveBeenCalledWith("hotkey_update", {
+      modifier: "Ctrl",
+      keyCode: "F11",
+    });
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    await api.beginHotkeyRecording();
+    await api.endHotkeyRecording();
+    expect(invokeMock).toHaveBeenCalledWith("hotkey_recording_begin");
+    expect(invokeMock).toHaveBeenCalledWith("hotkey_recording_end");
   });
 
   it("getReminderPreview 明确未实现", async () => {

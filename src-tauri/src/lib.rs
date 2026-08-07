@@ -15,11 +15,17 @@ use tauri::{Manager, WindowEvent};
 use adapters::clock::SystemClock;
 use adapters::id::UuidGenerator;
 use adapters::sqlite::SqliteDatabase;
+use adapters::sqlite_hotkey_settings::SqliteHotkeySettingsRepository;
+use adapters::tauri_global_shortcut::TauriGlobalShortcutAdapter;
 use adapters::tauri_window_manager::TauriWindowManager;
 use application::agents::AgentService;
+use application::hotkey::HotkeyRuntime;
 use application::tips::TipService;
 use application::windows::WindowApplicationService;
 use commands::agents::agent_list;
+use commands::hotkey::{
+    hotkey_get, hotkey_preview, hotkey_recording_begin, hotkey_recording_end, hotkey_update,
+};
 use commands::tips::{
     note_color_suggest, tip_create, tip_delete, tip_get, tip_list, tip_mark_used, tip_restore_used,
     tip_update, tip_update_color, tip_update_text,
@@ -75,6 +81,19 @@ fn on_window_event<R: tauri::Runtime>(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // 只处理 Pressed；Released 忽略。
+                    // 触发只调用 HotkeyRuntime 协调器，窗口逻辑复用 WindowApplicationService。
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        if let Some(runtime) = app.try_state::<Arc<HotkeyRuntime>>() {
+                            let _ = runtime.on_shortcut_pressed();
+                        }
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 第二实例：唤醒第一实例的 Main Window
             let state = app.state::<AppState>();
@@ -86,13 +105,24 @@ pub fn run() {
             let clock = Arc::new(SystemClock);
             let ids = Arc::new(UuidGenerator);
 
-            let tips = TipService::new(db.clone(), clock, ids);
-            let agents = AgentService::new(db);
+            let tips = TipService::new(db.clone(), clock.clone(), ids);
+            let agents = AgentService::new(db.clone());
 
             let app_handle = app.handle().clone();
-            let window_manager = Arc::new(TauriWindowManager::new(app_handle));
+            let window_manager = Arc::new(TauriWindowManager::new(app_handle.clone()));
             let windows = WindowApplicationService::new(window_manager.clone());
             let is_quitting = Arc::new(AtomicBool::new(false));
+
+            // Global Hotkey Runtime：启动注册失败不阻塞应用（Main/Tray/Settings 继续可用）
+            let hotkey_repo = Arc::new(SqliteHotkeySettingsRepository::new(db.clone()));
+            let registrar = Arc::new(TauriGlobalShortcutAdapter::new(app_handle.clone()));
+            let hotkey = Arc::new(HotkeyRuntime::new(
+                registrar,
+                hotkey_repo,
+                clock.clone(),
+                Arc::new(windows.clone()) as Arc<dyn application::hotkey::HotkeyWindowPort>,
+            ));
+            hotkey.startup()?;
 
             app.manage(AppState {
                 tips,
@@ -100,6 +130,7 @@ pub fn run() {
                 windows,
                 is_quitting: is_quitting.clone(),
             });
+            app.manage(hotkey);
 
             // 主窗口启动即创建并显示
             let _ = window_manager.show(WindowLabel::Main);
@@ -164,6 +195,11 @@ pub fn run() {
             tip_restore_used,
             tip_update_color,
             agent_list,
+            hotkey_get,
+            hotkey_preview,
+            hotkey_update,
+            hotkey_recording_begin,
+            hotkey_recording_end,
             window_open_main,
             window_open_quick_note,
             window_open_settings,

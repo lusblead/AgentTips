@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useRef, useState } from "react";
 import { Keyboard, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { desktopErrorMessage, ERROR_CODES } from "@/desktop-api/contract";
+import { desktopErrorMessage } from "@/desktop-api/contract";
 import type {
   DesktopApi,
   HotkeyBinding,
@@ -18,6 +18,11 @@ export interface HotkeyRecorderProps {
 }
 
 type RecorderState = "idle" | "recording" | "success" | "error";
+
+interface PendingConfirm {
+  binding: HotkeyBinding;
+  warning: { code: string; message: string };
+}
 
 function reasonText(result: HotkeyPreviewResult): string {
   if (result.ok) {
@@ -45,8 +50,10 @@ function detectedLabelFromEvent(event: KeyboardEvent): string {
 
 /**
  * 快捷键录制控件：只接受 Ctrl + 单个非修饰键。
- * 录制状态与已保存状态分离展示；非法/冲突时保留原快捷键。
- * 尚未接入系统注册时，展示中性占位文案而非错误。
+ * - 合法组合直接 updateHotkey（真实注册 + SQLite 持久化）；
+ * - 高冲突组合先显示确认，用户点“仍然使用”才更新；
+ * - 录制期间 begin/endHotkeyRecording 配对，抑制当前快捷键触发 Quick Note；
+ * - 取消/失败保留原快捷键。
  */
 export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
   const [current, setCurrent] = useState<HotkeyBinding>(initial);
@@ -54,6 +61,7 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
   const [detectedLabel, setDetectedLabel] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const cancel = useCallback(() => {
@@ -61,7 +69,34 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
     setDetectedLabel(null);
     setFeedback(null);
     setPending(false);
-  }, []);
+    setConfirm(null);
+    void api.endHotkeyRecording();
+  }, [api]);
+
+  const doUpdate = useCallback(
+    async (binding: HotkeyBinding) => {
+      setPending(true);
+      try {
+        await api.updateHotkey({
+          modifier: "Ctrl",
+          keyCode: binding.keyCode,
+        });
+        setCurrent(binding);
+        setState("success");
+        setFeedback(`已更新 ${binding.displayLabel}`);
+        setConfirm(null);
+        await api.endHotkeyRecording();
+      } catch (err) {
+        setState("error");
+        setFeedback(desktopErrorMessage(err));
+        setConfirm(null);
+        await api.endHotkeyRecording();
+      } finally {
+        setPending(false);
+      }
+    },
+    [api],
+  );
 
   const evaluate = useCallback(
     async (event: KeyboardEvent) => {
@@ -101,33 +136,24 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
       try {
         const result = await api.previewHotkey(candidate);
         if (result.ok) {
-          setCurrent(result.binding);
-          setState("success");
-          setFeedback(`已保存 ${result.binding.displayLabel}`);
+          if (result.warning) {
+            setConfirm({ binding: result.binding, warning: result.warning });
+          } else {
+            await doUpdate(result.binding);
+          }
         } else {
           setState("error");
           setFeedback(reasonText(result));
         }
       } catch (err) {
         const message = desktopErrorMessage(err);
-        const isUnavailable =
-          typeof err === "object" &&
-          err !== null &&
-          (err as { code?: string }).code === ERROR_CODES.INTERNAL_ERROR &&
-          message.includes("尚未实现");
-        if (isUnavailable) {
-          // 中性占位：能力将在系统功能启用后生效，不属于错误
-          setState("idle");
-          setFeedback("该能力将在系统功能启用后生效");
-        } else {
-          setState("error");
-          setFeedback(message);
-        }
+        setState("error");
+        setFeedback(message);
       } finally {
         setPending(false);
       }
     },
-    [api, cancel],
+    [api, cancel, doUpdate],
   );
 
   useEffect(() => {
@@ -153,6 +179,13 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [cancel, state]);
+
+  // 兜底：组件卸载（Settings 关闭）时恢复 suppression，防止快捷键永久失效。
+  useEffect(() => {
+    return () => {
+      void api.endHotkeyRecording();
+    };
+  }, [api]);
 
   const recording = state === "recording";
 
@@ -187,9 +220,11 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
             size="sm"
             variant={recording ? "secondary" : "default"}
             onClick={() => {
+              void api.beginHotkeyRecording();
               setState("recording");
               setDetectedLabel(null);
               setFeedback(null);
+              setConfirm(null);
             }}
             disabled={recording}
           >
@@ -239,6 +274,43 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
             {state === "error" && ` · 当前快捷键仍为 ${current.displayLabel}`}
           </p>
         )}
+
+        {confirm && (
+          <div
+            className="flex flex-col gap-2 rounded-md border border-warning/50 bg-warning-subtle p-3"
+            role="dialog"
+            aria-label="高冲突快捷键确认"
+          >
+            <p className="text-secondary-size text-text-primary">
+              {confirm.warning.message}。设为全局快捷键可能影响其他软件。
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => {
+                  setConfirm(null);
+                  setState("idle");
+                  setDetectedLabel(null);
+                  setFeedback(null);
+                  void api.endHotkeyRecording();
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={pending}
+                onClick={() => void doUpdate(confirm.binding)}
+              >
+                仍然使用
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -259,14 +331,17 @@ export interface HotkeySettingsWindowProps {
 export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps) {
   const [section, setSection] = useState<string>("hotkey");
   const [hotkey, setHotkey] = useState<HotkeyBinding | null>(null);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     api
-      .getSettings()
-      .then((settings) => {
-        if (!cancelled) setHotkey(settings.hotkey);
+      .getHotkeySettings()
+      .then((state) => {
+        if (cancelled) return;
+        setHotkey(state.configured ?? state.active);
+        setRegistrationError(state.registrationError);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(desktopErrorMessage(err));
@@ -318,6 +393,11 @@ export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps)
               ) : hotkey ? (
                 <>
                   <HotkeyRecorder api={api} initial={hotkey} />
+                  {registrationError && (
+                    <p className="text-secondary-size text-warning" role="alert">
+                      ⚠ 当前无法注册这个快捷键，请重新录制。
+                    </p>
+                  )}
                   <p className="text-secondary-size text-text-muted">
                     录制中按{" "}
                     <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">

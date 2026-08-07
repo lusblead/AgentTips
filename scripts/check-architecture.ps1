@@ -59,10 +59,10 @@ foreach ($file in $applicationFiles) {
     }
 }
 
-# 6. SQL 只能出现在 migrations/*.sql 与 adapters/sqlite.rs
+# 6. SQL 只能出现在 migrations/*.sql 与 adapters/（sqlite.rs、sqlite_hotkey_settings.rs 等 SQLite adapter）
 $rustFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src") -Recurse -Filter *.rs
 foreach ($file in $rustFiles) {
-    if ($file.FullName -match 'adapters\\sqlite\.rs$') { continue }
+    if ($file.FullName -match 'adapters\\(sqlite\.rs|sqlite_hotkey_settings\.rs)$') { continue }
     $content = Get-Content -Raw -Encoding UTF8 $file.FullName
     if ($content -cmatch '\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b') {
         $failures += "SQL 出现在非 SQLite adapter 文件: $($file.FullName)"
@@ -114,6 +114,26 @@ foreach ($file in $appRustFiles) {
     $content = Get-Content -Raw -Encoding UTF8 $file.FullName
     if ($content -match 'tauri::WebviewWindow|WebviewWindowBuilder') {
         $failures += "application 依赖具体 Tauri window 类型: $($file.FullName)"
+    }
+}
+
+# 12. feature 不得 import @tauri-apps/plugin-global-shortcut 或直接 register/unregister
+foreach ($file in $featureAllFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match '@tauri-apps/plugin-global-shortcut|\bregister\s*\(|\bunregister\s*\(') {
+        $failures += "feature 直接操作 global shortcut 插件: $($file.FullName)"
+    }
+}
+
+# 13. Rust domain/application/ports 不得依赖 tauri_plugin_global_shortcut（仅 adapter）
+$hotkeyBoundaryLayers = @("domain", "application", "ports")
+foreach ($layer in $hotkeyBoundaryLayers) {
+    $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+    foreach ($file in $layerFiles) {
+        $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+        if ($content -match 'tauri_plugin_global_shortcut') {
+            $failures += "$layer 依赖 global-shortcut 插件: $($file.FullName)"
+        }
     }
 }
 

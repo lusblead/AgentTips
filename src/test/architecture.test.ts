@@ -62,6 +62,21 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("feature 目录不得导入 @tauri-apps/plugin-global-shortcut 或直接 register/unregister", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      if (
+        content.includes("@tauri-apps/plugin-global-shortcut") ||
+        /\bregister\s*\(/.test(content) ||
+        /\bunregister\s*\(/.test(content)
+      ) {
+        violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
   it("React 源码中不得出现 SQL", () => {
     const violations: string[] = [];
     for (const file of listFiles(src)) {
@@ -135,10 +150,32 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("Rust domain/application/ports 不依赖 tauri_plugin_global_shortcut（仅 adapter 可用）", () => {
+    const violations: string[] = [];
+    for (const layer of ["domain", "application", "ports"]) {
+      for (const file of listRustFiles(join(srcTauri, "src", layer))) {
+        const content = readFileSync(file, "utf8");
+        if (content.includes("tauri_plugin_global_shortcut")) {
+          violations.push(relative(root, file));
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("HotkeyApplicationService 不依赖 TauriWindowManager", () => {
+    const hotkeyApp = readFileSync(join(srcTauri, "src", "application", "hotkey.rs"), "utf8");
+    expect(hotkeyApp).not.toMatch(/tauri_window_manager::|TauriWindowManager::/);
+  });
+
   it("SQL 只存在于 migrations 与 adapters/sqlite.rs", () => {
     const violations: string[] = [];
     for (const file of listRustFiles(join(srcTauri, "src"))) {
-      if (file.endsWith(join("adapters", "sqlite.rs"))) continue;
+      if (
+        file.includes(join("adapters", "sqlite.rs")) ||
+        file.includes(join("adapters", "sqlite_hotkey_settings.rs"))
+      )
+        continue;
       const content = readFileSync(file, "utf8");
       if (/\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b/.test(content)) {
         violations.push(relative(root, file));

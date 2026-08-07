@@ -8,7 +8,9 @@ import {
   type DesktopApi,
   type DesktopError,
   type HotkeyCandidate,
+  type HotkeyBinding,
   type HotkeyPreviewResult,
+  type HotkeyRuntimeState,
   type MockFailureKind,
   type NoteColorKey,
   type QuickNoteResetPayload,
@@ -225,8 +227,50 @@ export class TauriDesktopApi implements DesktopApi {
     return { ...FALLBACK_SETTINGS, hotkey: { ...FALLBACK_SETTINGS.hotkey } };
   }
 
-  async previewHotkey(_input: HotkeyCandidate): Promise<HotkeyPreviewResult> {
-    return notImplemented("快捷键录制校验");
+  async previewHotkey(input: HotkeyCandidate): Promise<HotkeyPreviewResult> {
+    try {
+      return await invoke<HotkeyPreviewResult>("hotkey_preview", {
+        modifier: input.modifier,
+        keyCode: input.keyCode,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getHotkeySettings(): Promise<HotkeyRuntimeState> {
+    try {
+      return await invoke<HotkeyRuntimeState>("hotkey_get");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateHotkey(input: HotkeyCandidate): Promise<HotkeyBinding> {
+    try {
+      return await invoke<HotkeyBinding>("hotkey_update", {
+        modifier: input.modifier,
+        keyCode: input.keyCode,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async beginHotkeyRecording(): Promise<void> {
+    try {
+      await invoke<void>("hotkey_recording_begin");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async endHotkeyRecording(): Promise<void> {
+    try {
+      await invoke<void>("hotkey_recording_end");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
   }
 
   async getReminderPreview(): Promise<ReminderPreview> {

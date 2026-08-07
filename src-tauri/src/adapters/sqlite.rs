@@ -17,6 +17,7 @@ use crate::ports::tips::TipRepository;
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_init.sql")),
     (2, include_str!("../../migrations/0002_living_notes.sql")),
+    (3, include_str!("../../migrations/0003_hotkey_settings.sql")),
 ];
 
 /// 内置 Agent 初始名单（docs/03-domain-data-model.md）。
@@ -34,6 +35,12 @@ pub struct SqliteDatabase {
 }
 
 impl SqliteDatabase {
+    /// 在连接锁内执行查询（供独立 repository 实现复用同一连接）。
+    pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
+        let conn = self.conn.lock().unwrap();
+        f(&conn)
+    }
+
     pub fn open(path: &Path) -> AppResult<Self> {
         let conn = Connection::open(path).map_err(AppError::from)?;
         Self::init(conn)

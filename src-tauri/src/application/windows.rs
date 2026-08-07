@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::application::hotkey::HotkeyWindowPort;
 use crate::error::AppResult;
 use crate::ports::window_manager::{WindowLabel, WindowManagerPort};
 
@@ -10,6 +11,7 @@ pub fn should_start_draft_session(was_visible: bool) -> bool {
 }
 
 /// 窗口用例：统一编排 show/hide/focus，供 command 与 tray 复用。
+#[derive(Clone)]
 pub struct WindowApplicationService {
     manager: Arc<dyn WindowManagerPort>,
 }
@@ -49,6 +51,12 @@ impl WindowApplicationService {
 
     pub fn quit(&self) -> AppResult<()> {
         self.manager.quit()
+    }
+}
+
+impl HotkeyWindowPort for WindowApplicationService {
+    fn show_quick_note(&self) -> AppResult<()> {
+        self.open_quick_note()
     }
 }
 

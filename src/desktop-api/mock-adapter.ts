@@ -7,6 +7,7 @@ import type {
   HotkeyBinding,
   HotkeyCandidate,
   HotkeyPreviewResult,
+  HotkeyRuntimeState,
   MockFailureKind,
   NoteColorKey,
   QuickNoteResetPayload,
@@ -444,9 +445,14 @@ export class MockDesktopApi implements DesktopApi {
   private tips: SeedTip[];
   private settings: AppSettings;
   private reminderPreview: ReminderPreview;
-  private failures: Record<MockFailureKind, boolean> = { save: false, delete: false };
+  private failures: Record<MockFailureKind, boolean> = {
+    save: false,
+    delete: false,
+    hotkey: false,
+  };
   private saveDelayMs = 0;
   windowCalls: string[] = [];
+  hotkeyCalls: string[] = [];
   private listeners: { quickNoteReset: Array<(payload: QuickNoteResetPayload) => void> } = {
     quickNoteReset: [],
   };
@@ -690,12 +696,55 @@ export class MockDesktopApi implements DesktopApi {
     const binding = hotkeyBinding(input.keyCode);
     if (binding.highConflict) {
       return {
-        ok: false,
-        reason: "highConflict",
-        message: `Ctrl + ${hotkeyDisplayKey(input.keyCode)} 可能覆盖系统常用操作，请确认后使用`,
+        ok: true,
+        binding,
+        warning: {
+          code: "HIGH_CONFLICT",
+          message: `Ctrl + ${hotkeyDisplayKey(input.keyCode)} 通常用于系统常用操作，设为全局快捷键可能影响其他软件`,
+        },
       };
     }
     return { ok: true, binding };
+  }
+
+  async getHotkeySettings(): Promise<HotkeyRuntimeState> {
+    return {
+      configured: { ...this.settings.hotkey },
+      active: { ...this.settings.hotkey },
+      registrationError: null,
+    };
+  }
+
+  async updateHotkey(input: HotkeyCandidate): Promise<HotkeyBinding> {
+    if (input.modifier !== "Ctrl") {
+      throw {
+        code: "HOTKEY_INVALID",
+        message: "快捷键只能使用 Ctrl + 一个按键",
+      };
+    }
+    if (!SUPPORTED_KEY_CODES.includes(input.keyCode as (typeof SUPPORTED_KEY_CODES)[number])) {
+      throw {
+        code: "HOTKEY_UNSUPPORTED_KEY",
+        message: `按键 ${input.keyCode} 不在支持范围`,
+      };
+    }
+    if (this.failures.hotkey) {
+      throw {
+        code: "HOTKEY_REGISTRATION_FAILED",
+        message: `无法注册 Ctrl + ${hotkeyDisplayKey(input.keyCode)}：该快捷键可能已被系统或其他程序占用`,
+      };
+    }
+    this.hotkeyCalls.push(`update:${input.keyCode}`);
+    this.settings.hotkey = hotkeyBinding(input.keyCode);
+    return { ...this.settings.hotkey };
+  }
+
+  async beginHotkeyRecording(): Promise<void> {
+    this.hotkeyCalls.push("begin");
+  }
+
+  async endHotkeyRecording(): Promise<void> {
+    this.hotkeyCalls.push("end");
   }
 
   async getReminderPreview(): Promise<ReminderPreview> {
@@ -728,7 +777,7 @@ export class MockDesktopApi implements DesktopApi {
       agent: { ...SEED_REMINDER_PREVIEW.agent },
       tips: SEED_REMINDER_PREVIEW.tips.map((tip) => ({ ...tip })),
     };
-    this.failures = { save: false, delete: false };
+    this.failures = { save: false, delete: false, hotkey: false };
     this.saveDelayMs = 0;
     this.windowCalls = [];
   }

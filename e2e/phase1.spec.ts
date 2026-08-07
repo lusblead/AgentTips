@@ -80,7 +80,7 @@ test.describe("Phase 1.5 交互流程", () => {
 
     await page.getByRole("button", { name: "重新录制" }).click();
     await page.keyboard.press("Control+k");
-    await expect(page.getByText("已保存 Ctrl + K")).toBeVisible();
+    await expect(page.getByText("已更新 Ctrl + K")).toBeVisible();
     await expect(display).toHaveText("Ctrl + K");
 
     await page.getByRole("button", { name: "重新录制" }).click();

@@ -96,8 +96,19 @@ export interface HotkeyCandidate {
 }
 
 export type HotkeyPreviewResult =
-  | { ok: true; binding: HotkeyBinding }
+  | {
+      ok: true;
+      binding: HotkeyBinding;
+      warning?: { code: string; message: string } | null;
+    }
   | { ok: false; reason: "invalid" | "unsupported" | "highConflict"; message: string };
+
+/** Configured（数据库持久化）与 Active（真实注册）的运行时状态。 */
+export interface HotkeyRuntimeState {
+  configured: HotkeyBinding | null;
+  active: HotkeyBinding | null;
+  registrationError: string | null;
+}
 
 export interface AppSettings {
   theme: "system" | "light" | "dark";
@@ -164,7 +175,7 @@ export function desktopErrorMessage(error: unknown): string {
 }
 
 /** 测试/调试辅助：让 Mock 在指定操作上失败，用于验证错误状态。 */
-export type MockFailureKind = "save" | "delete";
+export type MockFailureKind = "save" | "delete" | "hotkey";
 
 export interface DesktopApi {
   listTips(query?: TipQuery): Promise<TipSummary[]>;
@@ -194,6 +205,10 @@ export interface DesktopApi {
   listAgents(): Promise<Agent[]>;
   getSettings(): Promise<AppSettings>;
   previewHotkey(input: HotkeyCandidate): Promise<HotkeyPreviewResult>;
+  getHotkeySettings(): Promise<HotkeyRuntimeState>;
+  updateHotkey(input: HotkeyCandidate): Promise<HotkeyBinding>;
+  beginHotkeyRecording(): Promise<void>;
+  endHotkeyRecording(): Promise<void>;
 
   getReminderPreview(): Promise<ReminderPreview>;
 

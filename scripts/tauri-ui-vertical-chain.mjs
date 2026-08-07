@@ -890,14 +890,14 @@ async function run() {
     await clickButton(client, "重新录制");
     await client.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }))`);
     await client.waitForExpression(
-      `document.body.textContent.includes("该能力将在系统功能启用后生效")`,
-      "快捷键中性占位提示",
+      `document.body.textContent.includes("已更新 Ctrl + K")`,
+      "快捷键真实更新成功",
     );
     const hotkeyAfter = await client.evaluate(`document.querySelector('[data-testid="hotkey-display"]').textContent`);
-    if (hotkeyBefore !== "Ctrl + F12" || hotkeyAfter !== "Ctrl + F12") {
-      throw new Error(`快捷键降级异常 before=${hotkeyBefore} after=${hotkeyAfter}`);
+    if (hotkeyBefore !== "Ctrl + F12" || hotkeyAfter !== "Ctrl + K") {
+      throw new Error(`快捷键更新异常 before=${hotkeyBefore} after=${hotkeyAfter}`);
     }
-    console.log("settings degraded ok ✓ (中性占位提示、快捷键保持 F12)");
+    console.log("settings hotkey real update ok ✓ (Ctrl + F12 -> Ctrl + K, 立即生效)");
 
     // Phase 3A 不创建真实 Reminder 窗口；reminder 中性占位由浏览器 e2e（?window=reminder）覆盖
     console.log("reminder degraded: Phase 3A 无真实 Reminder 窗口，浏览器 e2e 覆盖 ✓");

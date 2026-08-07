@@ -24,7 +24,8 @@ $steps = @(
     @{ Name = "cargo clippy"; Command = "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings" },
     @{ Name = "cargo test"; Command = "cargo test --manifest-path src-tauri/Cargo.toml" },
     @{ Name = "pnpm test:tauri-ui (real WebView UI chain)"; Command = "pnpm test:tauri-ui" },
-    @{ Name = "pnpm test:windows-runtime (real multi-window lifecycle)"; Command = "pnpm test:windows-runtime" }
+    @{ Name = "pnpm test:windows-runtime (real multi-window lifecycle)"; Command = "pnpm test:windows-runtime" },
+    @{ Name = "pnpm test:global-hotkey (real global hotkey runtime)"; Command = "pnpm test:global-hotkey" }
 )
 
 $failed = @()

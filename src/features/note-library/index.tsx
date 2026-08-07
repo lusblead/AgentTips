@@ -120,6 +120,16 @@ export default function NoteLibraryWindow({
     };
   }, [api, view]);
 
+  // 真实多窗口下主窗口常驻：窗口重新获得焦点时刷新列表，
+  // 保证在 Quick Note 等其他窗口新建/修改 Tip 后主窗口数据不陈旧。
+  useEffect(() => {
+    function onFocus() {
+      void loadTips(view === "used");
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadTips, view]);
+
   // Cmd/Ctrl + F 展开搜索
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

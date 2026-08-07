@@ -11,11 +11,13 @@ import {
   type HotkeyPreviewResult,
   type MockFailureKind,
   type NoteColorKey,
+  type QuickNoteResetPayload,
   type ReminderPreview,
   type TipDetail,
   type TipQuery,
   type TipSummary,
   type UpdateTipInput,
+  type WindowKind,
 } from "./contract";
 
 const FALLBACK_SETTINGS: AppSettings = {
@@ -157,6 +159,57 @@ export class TauriDesktopApi implements DesktopApi {
     } catch (error) {
       throw toDesktopError(error);
     }
+  }
+
+  async openMainWindow(): Promise<void> {
+    try {
+      await invoke<void>("window_open_main");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async openQuickNoteWindow(): Promise<void> {
+    try {
+      await invoke<void>("window_open_quick_note");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async openSettingsWindow(): Promise<void> {
+    try {
+      await invoke<void>("window_open_settings");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async hideCurrentWindow(label: string): Promise<void> {
+    try {
+      await invoke<void>("window_hide_current", { label });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getWindowKind(): Promise<WindowKind> {
+    // desktop-api 适配层读取当前 WebviewWindow label（feature 不感知）
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const label = getCurrentWindow().label;
+    if (label === "quick-note" || label === "settings" || label === "reminder") {
+      return label;
+    }
+    return "main";
+  }
+
+  async subscribeQuickNoteReset(
+    handler: (payload: QuickNoteResetPayload) => void,
+  ): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<QuickNoteResetPayload>("agenttips://quick-note/reset", (event) =>
+      handler(event.payload),
+    );
   }
 
   async listAgents(): Promise<Agent[]> {

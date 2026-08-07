@@ -36,6 +36,21 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("feature 目录不得导入 @tauri-apps/api/window 或 webviewWindow，且不得 new WebviewWindow", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      if (
+        content.includes("@tauri-apps/api/window") ||
+        content.includes("@tauri-apps/api/webviewWindow") ||
+        /new\s+WebviewWindow\s*\(/.test(content)
+      ) {
+        violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
   it("feature 目录不得直接调用 invoke() 或 listen()", () => {
     const violations: string[] = [];
     for (const file of listFiles(featuresDir)) {
@@ -103,6 +118,18 @@ describe("架构边界（静态检查）", () => {
         if (content.includes(forbidden)) {
           violations.push(`${relative(root, file)} -> ${forbidden}`);
         }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust application 不依赖具体 Tauri window 类型（仅 adapter 可用）", () => {
+    const appDir = join(srcTauri, "src", "application");
+    const violations: string[] = [];
+    for (const file of listRustFiles(appDir)) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("tauri::WebviewWindow") || content.includes("WebviewWindowBuilder")) {
+        violations.push(relative(root, file));
       }
     }
     expect(violations).toEqual([]);

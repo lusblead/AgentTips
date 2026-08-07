@@ -38,8 +38,8 @@ describe("窗口路由", () => {
     const { unmount } = render(<App />);
     await screen.findByText("AgentTips");
     window.history.pushState({}, "", "/?window=quick-note");
-    const { getWindowContext } = await import("@/desktop-api");
-    expect(getWindowContext().kind).toBe("quick-note");
+    const { getBrowserWindowContext } = await import("@/desktop-api");
+    expect(getBrowserWindowContext().kind).toBe("quick-note");
     act(() => {
       window.dispatchEvent(new Event("agenttips:route"));
     });

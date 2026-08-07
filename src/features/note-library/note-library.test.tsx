@@ -29,6 +29,25 @@ function tipCardByTitle(title: string) {
 }
 
 describe("主管理窗口（Living Notes）", () => {
+  it("窗口重新获得焦点时重新拉取列表（跨窗口新建后可读）", async () => {
+    const api = new MockDesktopApi();
+    const listSpy = vi.spyOn(api, "listTips");
+    await renderLibrary(api);
+    const callsAfterMount = listSpy.mock.calls.length;
+
+    // 模拟在 Quick Note 窗口新建一张 Tip（真实 SQLite 语义：同 adapter 可读）
+    await api.createTip({
+      title: "焦点恢复后可读",
+      content: "从另一窗口写入",
+      bindings: [],
+    });
+
+    // 主窗口重新获得焦点 -> 触发重新拉取 -> 新 Tip 出现在首页
+    fireEvent.focus(window);
+    expect(listSpy.mock.calls.length).toBeGreaterThan(callsAfterMount);
+    await waitFor(() => expect(tipCardByTitle("焦点恢复后可读")).toBeDefined());
+  });
+
   it("首页默认展示所有 Tip Card（含正文直编输入）", async () => {
     const api = new MockDesktopApi();
     await renderLibrary(api);

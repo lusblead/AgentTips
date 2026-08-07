@@ -12,11 +12,22 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "AgentTips",
-        "width": 800,
-        "height": 600
+        "width": 1100,
+        "height": 760,
+        "minWidth": 900,
+        "minHeight": 620,
+        "resizable": true,
+        "decorations": true,
+        "center": true
       }
     ],
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": false,
+      "showMenuOnLeftClick": true
+    },
     "security": {
       "csp": null
     }

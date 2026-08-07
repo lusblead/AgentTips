@@ -99,6 +99,24 @@ foreach ($file in $featureTests) {
     }
 }
 
+# 10. feature 目录不得 import @tauri-apps/api/window|webviewWindow 或 new WebviewWindow
+$featureAllFiles = Get-ChildItem -Path (Join-Path $root "src\features") -Recurse -Include *.ts, *.tsx
+foreach ($file in $featureAllFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match '@tauri-apps/api/window|@tauri-apps/api/webviewWindow|new\s+WebviewWindow\s*\(') {
+        $failures += "feature 使用 Tauri 窗口 API: $($file.FullName)"
+    }
+}
+
+# 11. Rust application 不依赖具体 Tauri window 类型
+$appRustFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\application") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+foreach ($file in $appRustFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'tauri::WebviewWindow|WebviewWindowBuilder') {
+        $failures += "application 依赖具体 Tauri window 类型: $($file.FullName)"
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "check-architecture: FAIL"
     $failures | ForEach-Object { Write-Host "  - $_" }

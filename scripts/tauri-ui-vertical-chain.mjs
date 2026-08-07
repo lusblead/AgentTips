@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CDP_PORT = 9222;
-const DEV_URL = "http://localhost:1420";
 const CDP_ENDPOINT = `http://127.0.0.1:${CDP_PORT}/json/list`;
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 let appProcess = null;
@@ -110,11 +109,62 @@ conn.close()
   console.log(`db cleanup (${prefix}): removed ${Number(runPython(code))}`);
 }
 
-async function getTargetUrl() {
+async function listPageTargets() {
   const response = await fetch(CDP_ENDPOINT);
   const targets = await response.json();
-  const page = targets.find((target) => target.type === "page");
-  return page?.webSocketDebuggerUrl ?? null;
+  return targets.filter((target) => target.type === "page");
+}
+
+/** 通过 DOM data-window 识别窗口身份并连接（生产 Tauri 中页面身份来自 WebviewWindow label） */
+async function connectWindow(kind, { timeout = 60_000 } = {}) {
+  await waitFor(
+    async () => {
+      const targets = await listPageTargets();
+      for (const target of targets) {
+        const probe = new CdpClient(target.webSocketDebuggerUrl);
+        try {
+          await probe.open();
+          const current =
+            (await probe.evaluate(
+              `document.querySelector('[data-window]')?.getAttribute('data-window') ?? null`,
+            )) ?? null;
+          if (current === kind) return true;
+          probe.close();
+        } catch {
+          try {
+            probe.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      return false;
+    },
+    { timeout, label: `window ${kind}` },
+  );
+  const targets = await listPageTargets();
+  for (const target of targets) {
+    const client = new CdpClient(target.webSocketDebuggerUrl);
+    await client.open();
+    const current = await client.evaluate(
+      `document.querySelector('[data-window]')?.getAttribute('data-window') ?? null`,
+    );
+    if (current === kind) return client;
+    client.close();
+  }
+  throw new Error(`window ${kind} not found`);
+}
+
+/** 打开窗口并连接到对应 target（生产 Tauri 中由 WindowManager 统一创建/复用窗口） */
+async function openWindow(fromClient, kind) {
+  const command = {
+    "quick-note": "window_open_quick_note",
+    settings: "window_open_settings",
+    main: "window_open_main",
+  }[kind];
+  await fromClient.evaluate(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})`);
+  await sleep(400);
+  return connectWindow(kind);
 }
 
 class CdpClient {
@@ -179,25 +229,11 @@ class CdpClient {
     return result.result.value;
   }
 
-  async switchRoute(windowKind, extra = {}) {
-    const url = new URL(`${DEV_URL}/`);
-    url.searchParams.set("window", windowKind);
-    for (const [key, value] of Object.entries(extra)) {
-      url.searchParams.set(key, value);
-    }
-    await this.evaluate(`(() => {
-      history.pushState({}, "", ${JSON.stringify(url.toString())});
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    })()`);
-    await sleep(150);
-  }
-
   async waitWindow(windowKind) {
     const expressions = {
       "quick-note": `document.querySelector('textarea[aria-label="正文"]') !== null`,
       main: `document.body.textContent.includes("AgentTips")`,
       settings: `Boolean(document.querySelector('[data-testid="hotkey-display"]'))`,
-      reminder: `document.querySelector('[role="alert"]') !== null`,
     };
     const expression = expressions[windowKind];
     if (!expression) {
@@ -272,17 +308,6 @@ async function waitAppStopped() {
     }
   }, { timeout: 30_000, label: "应用完全退出" });
   await sleep(1000);
-}
-
-async function connect() {
-  await waitFor(async () => (await getTargetUrl()) !== null, {
-    timeout: 120_000,
-    label: "CDP target 出现",
-  });
-  const url = await getTargetUrl();
-  const client = new CdpClient(url);
-  await client.open();
-  return client;
 }
 
 async function assertAdapter(client) {
@@ -523,6 +548,7 @@ async function run() {
   const errorTitle = `${errorPrefix}-${Date.now()}`;
   const errorEdited = `${errorTitle} 修改后仍保留`;
   let client = null;
+  let mainClient;
 
   try {
     // 从干净数据库开始：清理历史失败的测试残留（测试数据清理，非业务操作）
@@ -531,7 +557,8 @@ async function run() {
 
     // ---- 启动 ----
     startApp();
-    client = await connect();
+    mainClient = await connectWindow("main");
+    client = mainClient;
     console.log("app started");
 
     // ---- adapter 断言 ----
@@ -542,7 +569,7 @@ async function run() {
     await assertAdapter(client);
 
     // ---- 创建 ----
-    await client.switchRoute("quick-note");
+    client = await openWindow(mainClient, "quick-note");
     await client.waitWindow("quick-note");
     await setTextarea(client, "正文", uniqueTitle);
     await pickAgent(client, "Cursor");
@@ -557,7 +584,8 @@ async function run() {
     console.log("create via UI ok ✓");
 
     // ---- 主页面验证 ----
-    await client.switchRoute("main");
+    client = mainClient;
+    await openWindow(mainClient, "main");
     await client.waitWindow("main");
     await openTipByTitle(client, uniqueTitle);
     const content1 = await detailContent(client);
@@ -570,7 +598,8 @@ async function run() {
     assertNoConsoleErrors(client, "create+read");
 
     // ---- Living Notes：首页 inline 修改 → autosave → reload 验证 ----
-    await client.switchRoute("main");
+    client = mainClient;
+    await openWindow(mainClient, "main");
     await client.waitWindow("main");
     const searchVisible = await client.evaluate(
       `Boolean(document.querySelector('[aria-label="搜索"]'))`,
@@ -726,13 +755,14 @@ async function run() {
     stopApp();
     await waitAppStopped();
     startApp();
-    client = await connect();
+    mainClient = await connectWindow("main");
+    client = mainClient;
     await client.waitForExpression(
       `Boolean(document.querySelector('[data-desktop-adapter]'))`,
       "重启后 adapter 标识",
     );
     await assertAdapter(client);
-    await client.switchRoute("main");
+    await openWindow(mainClient, "main");
     await client.waitWindow("main");
     await clickByAria(client, "搜索");
     await setInput(client, "搜索便签", uniqueTitle);
@@ -800,7 +830,7 @@ async function run() {
     sqliteAssertClean(titlePrefix);
 
     // ---- 真实错误路径 ----
-    await client.switchRoute("quick-note");
+    client = await openWindow(mainClient, "quick-note");
     await client.waitWindow("quick-note");
     await setTextarea(client, "正文", errorTitle);
     await pickAgent(client, "Cursor");
@@ -809,7 +839,8 @@ async function run() {
       `document.querySelector('[role="status"]')?.textContent.includes("已保存")`,
       "错误路径创建成功",
     );
-    await client.switchRoute("main");
+    client = mainClient;
+    await openWindow(mainClient, "main");
     await client.waitWindow("main");
     await openTipByTitle(client, errorTitle);
     sqliteDeleteByTitle(errorTitle, errorPrefix);
@@ -830,12 +861,13 @@ async function run() {
     console.log(`real error path ok ✓ (alert="${alertText}", 输入保留)`);
     assertNoConsoleErrors(client, "error-path");
     // 应用仍可用
-    await client.switchRoute("main");
+    client = mainClient;
+    await openWindow(mainClient, "main");
     await client.waitWindow("main");
     console.log("app alive after error path ✓");
 
     // ---- 未实现能力降级 ----
-    await client.switchRoute("settings");
+    client = await openWindow(mainClient, "settings");
     await client.waitWindow("settings");
     const hotkeyBefore = await client.evaluate(`document.querySelector('[data-testid="hotkey-display"]').textContent`);
     await clickButton(client, "重新录制");
@@ -850,18 +882,15 @@ async function run() {
     }
     console.log("settings degraded ok ✓ (中性占位提示、快捷键保持 F12)");
 
-    await client.switchRoute("reminder");
-    await client.waitForExpression(
-      `document.body.textContent.includes("不提供预览")`,
-      "提醒中性占位提示",
-    );
-    console.log("reminder degraded ok ✓ (中性占位提示、不白屏)");
+    // Phase 3A 不创建真实 Reminder 窗口；reminder 中性占位由浏览器 e2e（?window=reminder）覆盖
+    console.log("reminder degraded: Phase 3A 无真实 Reminder 窗口，浏览器 e2e 覆盖 ✓");
     assertNoConsoleErrors(client, "degraded-pages");
 
     // ---- 主管理与快捷不受影响 ----
-    await client.switchRoute("main");
+    client = mainClient;
+    await openWindow(mainClient, "main");
     await client.waitWindow("main");
-    await client.switchRoute("quick-note");
+    client = await openWindow(mainClient, "quick-note");
     await client.waitWindow("quick-note");
     console.log("main & quick-note unaffected ✓");
 

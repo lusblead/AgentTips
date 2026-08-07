@@ -80,6 +80,22 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
       .catch(() => setDraftColor("lemon"));
   }, [api]);
 
+  // 每次 Quick Note 显示（Tauri emit reset / 浏览器 hide 模拟）都开始新的 Draft Session
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    api
+      .subscribeQuickNoteReset(() => reset())
+      .then((unsub) => {
+        unsubscribe = unsub;
+      })
+      .catch(() => {
+        /* 事件订阅失败不阻塞创建流程 */
+      });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [api, reset]);
+
   const canSave = content.trim().length > 0 && bindings.length > 0;
   const noAgentHint = !submitAttempted && content.trim().length > 0 && bindings.length === 0;
 
@@ -100,9 +116,12 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
         bindings: bindings.map((b) => ({ agentId: b.agentId, autoAttach: b.autoAttach })),
       });
       setSaved(true);
-      window.setTimeout(() => setSaved(false), 900);
-      reset();
-      textareaRef.current?.focus();
+      // 保存成功后：显示轻量成功状态 → 约 300ms 后隐藏窗口并清空 Draft
+      window.setTimeout(() => {
+        setSaved(false);
+        reset();
+        void api.hideCurrentWindow("quick-note");
+      }, 300);
     } catch (err) {
       setError(desktopErrorMessage(err));
     } finally {
@@ -115,7 +134,9 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose?.();
+        // Esc：视为取消，清空 Draft 并隐藏窗口（不弹确认）
+        reset();
+        void api.hideCurrentWindow("quick-note");
         return;
       }
       if (event.ctrlKey && event.key === "Enter") {
@@ -125,7 +146,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, submit]);
+  }, [api, onClose, reset, submit]);
 
   return (
     <main

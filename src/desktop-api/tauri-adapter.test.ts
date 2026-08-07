@@ -8,6 +8,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
+const listenMock = vi.fn();
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (...args: unknown[]) => listenMock(...args),
+}));
+
 const CURSOR_AGENT_ID = "10000000-0000-0000-0000-000000000002";
 const CLAUDE_AGENT_ID = "10000000-0000-0000-0000-000000000004";
 
@@ -105,5 +110,28 @@ describe("TauriDesktopApi", () => {
       code: ERROR_CODES.INTERNAL_ERROR,
       message: /尚未实现/,
     });
+  });
+
+  it("openMainWindow / openQuickNoteWindow / openSettingsWindow 调用正确 command", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await api.openMainWindow();
+    await api.openQuickNoteWindow();
+    await api.openSettingsWindow();
+    expect(invokeMock).toHaveBeenCalledWith("window_open_main");
+    expect(invokeMock).toHaveBeenCalledWith("window_open_quick_note");
+    expect(invokeMock).toHaveBeenCalledWith("window_open_settings");
+  });
+
+  it("hideCurrentWindow 传递 label", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await api.hideCurrentWindow("quick-note");
+    expect(invokeMock).toHaveBeenCalledWith("window_hide_current", { label: "quick-note" });
+  });
+
+  it("subscribeQuickNoteReset 调用 listen 并解绑", async () => {
+    listenMock.mockResolvedValue(() => undefined);
+    const unsub = await api.subscribeQuickNoteReset(() => undefined);
+    expect(listenMock).toHaveBeenCalledWith("agenttips://quick-note/reset", expect.any(Function));
+    expect(typeof unsub).toBe("function");
   });
 });

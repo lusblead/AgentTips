@@ -9,12 +9,14 @@ import type {
   HotkeyPreviewResult,
   MockFailureKind,
   NoteColorKey,
+  QuickNoteResetPayload,
   ReminderPreview,
   TipDetail,
   TipBindingDto,
   TipQuery,
   TipSummary,
   UpdateTipInput,
+  WindowKind,
 } from "./contract";
 
 /** 统一支持键集合（KeyboardEvent.code 格式）。Phase 2 起与 Rust 侧一致。 */
@@ -444,6 +446,10 @@ export class MockDesktopApi implements DesktopApi {
   private reminderPreview: ReminderPreview;
   private failures: Record<MockFailureKind, boolean> = { save: false, delete: false };
   private saveDelayMs = 0;
+  windowCalls: string[] = [];
+  private listeners: { quickNoteReset: Array<(payload: QuickNoteResetPayload) => void> } = {
+    quickNoteReset: [],
+  };
 
   constructor(options?: { withSeed?: boolean; withUsedTip?: boolean }) {
     this.agents = SEED_AGENTS.map((agent) => ({ ...agent }));
@@ -617,6 +623,52 @@ export class MockDesktopApi implements DesktopApi {
     return detailOf(tip);
   }
 
+  async openMainWindow(): Promise<void> {
+    this.windowCalls.push("openMainWindow");
+  }
+
+  async openQuickNoteWindow(): Promise<void> {
+    this.windowCalls.push("openQuickNoteWindow");
+  }
+
+  async openSettingsWindow(): Promise<void> {
+    this.windowCalls.push("openSettingsWindow");
+  }
+
+  async hideCurrentWindow(_label: string): Promise<void> {
+    this.windowCalls.push("hideCurrentWindow");
+    // 浏览器模式：隐藏 Quick Note 等价于重置 draft（与生产 show 事件语义一致）
+    this.emitQuickNoteReset({ openedAt: new Date().toISOString() });
+  }
+
+  async getWindowKind(): Promise<WindowKind> {
+    const params = new URLSearchParams(window.location.search);
+    const kind = params.get("window");
+    if (kind === "quick-note" || kind === "settings" || kind === "reminder") {
+      return kind;
+    }
+    return "main";
+  }
+
+  async subscribeQuickNoteReset(
+    handler: (payload: QuickNoteResetPayload) => void,
+  ): Promise<() => void> {
+    this.listeners.quickNoteReset.push(handler);
+    return () => {
+      const idx = this.listeners.quickNoteReset.indexOf(handler);
+      if (idx >= 0) this.listeners.quickNoteReset.splice(idx, 1);
+    };
+  }
+
+  /** 测试/浏览器模拟：模拟 Quick Note 显示时的新 Draft Session。 */
+  simulateQuickNoteReset(): void {
+    this.emitQuickNoteReset({ openedAt: new Date().toISOString() });
+  }
+
+  private emitQuickNoteReset(payload: QuickNoteResetPayload): void {
+    this.listeners.quickNoteReset.forEach((handler) => handler(payload));
+  }
+
   async listAgents(): Promise<Agent[]> {
     return this.agents.map((agent) => ({ ...agent }));
   }
@@ -678,6 +730,7 @@ export class MockDesktopApi implements DesktopApi {
     };
     this.failures = { save: false, delete: false };
     this.saveDelayMs = 0;
+    this.windowCalls = [];
   }
 }
 

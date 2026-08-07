@@ -8,6 +8,7 @@
 
 export type AgentKind = "desktop" | "terminal";
 export type TipStatus = "active" | "archived";
+export type WindowKind = "main" | "quick-note" | "settings" | "reminder";
 export type NoteColorKey =
   | "lemon"
   | "apricot"
@@ -120,6 +121,11 @@ export interface ReminderPreview {
   tips: ReminderTip[];
 }
 
+/** 快捷窗口每次显示前由后端发出的重置事件（新 Draft Session）。 */
+export interface QuickNoteResetPayload {
+  openedAt: string;
+}
+
 /** 统一结构化错误（与 Rust AppErrorDto 对应）。 */
 export interface DesktopError {
   code: string;
@@ -174,11 +180,25 @@ export interface DesktopApi {
   restoreTipUsed(id: string): Promise<TipDetail>;
   updateTipColor(id: string, colorKey: NoteColorKey): Promise<TipDetail>;
 
+  /** 打开主窗口（显示/聚焦）。 */
+  openMainWindow(): Promise<void>;
+  /** 打开快捷新建窗口（懒创建/复用；已打开时不重置 draft）。 */
+  openQuickNoteWindow(): Promise<void>;
+  /** 打开设置窗口（懒创建/复用）。 */
+  openSettingsWindow(): Promise<void>;
+  /** 隐藏当前窗口（由调用方传入当前窗口 label）。 */
+  hideCurrentWindow(label: string): Promise<void>;
+  /** 返回当前窗口类型（生产 = Tauri label；浏览器 = URL 参数）。 */
+  getWindowKind(): Promise<WindowKind>;
+
   listAgents(): Promise<Agent[]>;
   getSettings(): Promise<AppSettings>;
   previewHotkey(input: HotkeyCandidate): Promise<HotkeyPreviewResult>;
 
   getReminderPreview(): Promise<ReminderPreview>;
+
+  /** 订阅快捷窗口 reset（新 Draft Session）。Tauri 下由 Window Manager show 时触发。 */
+  subscribeQuickNoteReset(handler: (payload: QuickNoteResetPayload) => void): Promise<() => void>;
 
   setMockFailure(kind: MockFailureKind, enabled: boolean): void;
   reset(): void;

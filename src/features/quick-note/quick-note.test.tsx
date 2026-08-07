@@ -162,4 +162,52 @@ describe("快捷新建窗口", () => {
     expect(suggestSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     second.unmount();
   });
+
+  it("保存成功后约 300ms 隐藏窗口并清空 Draft", async () => {
+    const api = new MockDesktopApi();
+    const hideSpy = vi.spyOn(api, "hideCurrentWindow");
+    const { user, unmount } = await renderQuickNote(api);
+    await user.type(screen.getByLabelText("正文"), "保存后应清空");
+    await selectAgent(user, "Cursor");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("已保存"));
+    await waitFor(() => expect(hideSpy).toHaveBeenCalledWith("quick-note"), { timeout: 2000 });
+    expect(screen.getByLabelText("正文")).toHaveValue("");
+    unmount();
+  });
+
+  it("Esc 清空 Draft 并隐藏窗口", async () => {
+    const api = new MockDesktopApi();
+    const hideSpy = vi.spyOn(api, "hideCurrentWindow");
+    const { user, unmount } = await renderQuickNote(api);
+    await user.type(screen.getByLabelText("正文"), "取消的内容");
+    await user.keyboard("{Escape}");
+    expect(hideSpy).toHaveBeenCalledWith("quick-note");
+    expect(screen.getByLabelText("正文")).toHaveValue("");
+    unmount();
+  });
+
+  it("收到 reset 事件时清空 Draft 并重新请求颜色", async () => {
+    const api = new MockDesktopApi();
+    const suggestSpy = vi.spyOn(api, "suggestNoteColor");
+    const { user, unmount } = await renderQuickNote(api);
+    await user.type(screen.getByLabelText("正文"), "旧草稿");
+    await selectAgent(user, "Cursor");
+    api.simulateQuickNoteReset();
+    await waitFor(() => expect(screen.getByLabelText("正文")).toHaveValue(""));
+    expect(suggestSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    unmount();
+  });
+
+  it("已可见时再次打开不清空正在编辑的草稿（仅 reset 事件清空）", async () => {
+    const api = new MockDesktopApi();
+    const openSpy = vi.spyOn(api, "openQuickNoteWindow");
+    const { user, unmount } = await renderQuickNote(api);
+    await user.type(screen.getByLabelText("正文"), "正在编辑的内容");
+    await selectAgent(user, "Cursor");
+    await api.openQuickNoteWindow();
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("正文")).toHaveValue("正在编辑的内容");
+    unmount();
+  });
 });

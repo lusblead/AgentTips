@@ -13,6 +13,8 @@ pub enum AppError {
     Database(String),
     #[error("迁移错误: {0}")]
     Migration(String),
+    #[error("窗口错误: {0}")]
+    Window(String),
     #[error("内部错误: {0}")]
     Internal(String),
 }
@@ -25,12 +27,16 @@ impl AppError {
             AppError::Conflict(_) => "CONFLICT",
             AppError::Database(_) => "DATABASE_ERROR",
             AppError::Migration(_) => "MIGRATION_ERROR",
+            AppError::Window(_) => "WINDOW_ERROR",
             AppError::Internal(_) => "INTERNAL_ERROR",
         }
     }
 
     pub fn retryable(&self) -> bool {
-        matches!(self, AppError::Database(_) | AppError::Conflict(_))
+        matches!(
+            self,
+            AppError::Database(_) | AppError::Conflict(_) | AppError::Window(_)
+        )
     }
 }
 

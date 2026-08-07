@@ -137,7 +137,10 @@ describe("快捷新建窗口", () => {
     const main = screen.getByTestId("quick-note-shell");
     const surface = screen.getByTestId("note-surface");
     expect(main.className).toContain("bg-surface-canvas");
-    expect(surface.className).toContain("bg-note-");
+    const style = window.getComputedStyle(surface);
+    expect(style.backgroundColor).toMatch(/^rgb\(/);
+    expect(style.backgroundColor).not.toBe("rgb(255, 255, 255)");
+    expect(style.backgroundColor).not.toBe("rgb(245, 247, 250)");
     expect(surface.getAttribute("data-color")).toBeTruthy();
   });
 

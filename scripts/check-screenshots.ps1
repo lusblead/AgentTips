@@ -86,6 +86,21 @@ $expectedMap = if ($Directory -eq "phase-1.5") {
         "quick-note-multiple-agents.png" = "1000x750"
         "note-detail.png" = "1000x750"
     }
+} elseif ($Directory -eq "phase-2.4R") {
+    @{
+        "home-color-wall-many.png" = "1000x750"
+        "home-four-columns.png" = "1000x750"
+        "home-inline-title.png" = "1000x750"
+        "home-inline-body.png" = "1000x750"
+        "home-long-note.png" = "1000x750"
+        "home-note-hover.png" = "1000x750"
+        "quick-note-lemon.png" = "1000x750"
+        "quick-note-mint.png" = "1000x750"
+        "quick-note-multiple-agents.png" = "1000x750"
+        "used-notes.png" = "1000x750"
+        "used-notes-empty.png" = "1000x750"
+        "note-detail.png" = "1000x750"
+    }
 } else {
     @{}
 }
@@ -124,7 +139,7 @@ foreach ($name in $files) {
     }
     $contentRatio = $nonBg / $total
     $minRatio = 0.01
-    if ($Directory -in @("phase-2.1", "phase-2.2", "phase-2.3", "phase-2.4")) {
+    if ($Directory -in @("phase-2.1", "phase-2.2", "phase-2.3", "phase-2.4", "phase-2.4R")) {
         $minRatio = 0.002
     }
     if ($name -eq "main-window-empty.png") {
@@ -135,7 +150,7 @@ foreach ($name in $files) {
         $failures += "$name content ratio too low: $([Math]::Round($contentRatio * 100, 2))%"
     }
     $edgeThreshold = 60
-    if ($Directory -eq "phase-2.3" -or $name -like "quick-note*") {
+    if ($Directory -eq "phase-2.3" -or $name -like "quick-note*" -or $Directory -eq "phase-2.4R") {
         # pastel 全屏底色窗口：边缘像素为设计底色而非裁切
         $edgeThreshold = 25000
     }

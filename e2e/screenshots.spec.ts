@@ -165,8 +165,6 @@ test.describe("Phase 2.2 补充截图（浏览器 Mock）", () => {
 });
 
 test.describe("Phase 2.4 补充截图（浏览器 Mock）", () => {
-  const PHASE24 = join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.4");
-
   test("已使用便签空态", async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (message) => {
@@ -188,7 +186,9 @@ test.describe("Phase 2.4 补充截图（浏览器 Mock）", () => {
     await page.getByRole("menuitem", { name: "已使用便签" }).click();
     await expect(page.getByRole("heading", { name: "已使用" })).toBeVisible();
     await expect(page.getByText("还没有已使用的便签")).toBeVisible();
-    await page.screenshot({ path: join(PHASE24, "used-notes-empty.png") });
+    await page.screenshot({
+      path: join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.4R", "used-notes-empty.png"),
+    });
     expect(errors).toEqual([]);
   });
 });

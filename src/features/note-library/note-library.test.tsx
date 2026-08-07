@@ -169,17 +169,12 @@ describe("主管理窗口（Living Notes）", () => {
     expect(within(dialog).getByRole("button", { name: "还原" })).toBeInTheDocument();
   });
 
-  it("Editor 内可修改便签颜色并持久化", async () => {
+  it("Editor 不暴露颜色选择器（第一版自动分配）", async () => {
     const api = new MockDesktopApi();
     const { user } = await renderLibrary(api);
     const dialog = await expandFirstTip(user);
-    const before = dialog.getAttribute("data-color") ?? dialog.className;
-    await user.click(within(dialog).getByRole("button", { name: "选择颜色 天空" }));
-    await waitFor(() => {
-      const card = tipCardByTitle("修改前解释调用链");
-      expect(card?.getAttribute("data-color")).toBe("sky");
-    });
-    expect(before).not.toBe("sky");
+    expect(within(dialog).queryByText("便签颜色")).not.toBeInTheDocument();
+    expect(dialog.getAttribute("data-note-color")).toBeTruthy();
   });
 
   it("Agent filter 在 Popover 内且过滤后 Grid 正确", async () => {

@@ -580,7 +580,7 @@ function MasonryGrid({
   return (
     <div
       ref={gridRef}
-      className={`grid grid-cols-[repeat(auto-fill,minmax(236px,248px))] items-start ${className ?? ""}`}
+      className={`grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] items-start ${className ?? ""}`}
       style={{
         gridAutoRows: `${rowUnit}px`,
         gap: `${gap}px`,

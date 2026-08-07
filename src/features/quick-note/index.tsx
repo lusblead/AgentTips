@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
 import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
 import { cn } from "@/lib/utils";
-import { noteColorClass } from "@/lib/palette";
+import { noteStyle } from "@/lib/palette";
 import { desktopErrorMessage } from "@/desktop-api/contract";
 import type { Agent, DesktopApi, NoteColorKey } from "@/desktop-api/contract";
 
@@ -148,12 +148,14 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 px-5 pb-4">
+      <div className="flex min-h-0 flex-1 justify-center overflow-y-auto px-5 pb-4">
         <div
-          className={`flex min-h-0 flex-1 flex-col rounded-[var(--radius-note)] p-4 shadow-[var(--note-shadow)] transition-shadow duration-[150ms] ${
-            draftColor ? noteColorClass(draftColor) : "bg-surface-primary"
-          } text-note-text-primary`}
+          className="quick-note-paper flex w-full max-w-[calc(100%-40px)] min-h-[440px] flex-col rounded-[16px] p-5 shadow-[0_12px_34px_rgba(15,23,42,0.10)]"
+          style={
+            draftColor ? noteStyle(draftColor) : { backgroundColor: "#F5F7FA", color: "#243044" }
+          }
           data-testid="note-surface"
+          data-note-color={draftColor ?? undefined}
           data-color={draftColor ?? undefined}
         >
           {showTitle ? (
@@ -162,7 +164,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
               placeholder="标题（可选）"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              className="mb-2 border-transparent bg-transparent px-1 text-page-title font-medium text-note-text-primary placeholder:text-note-text-secondary focus-visible:border-accent-ring"
+              className="mb-2 border-none bg-transparent px-1 text-page-title font-medium outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0"
             />
           ) : (
             <Button
@@ -183,7 +185,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
             value={content}
             onChange={(event) => setContent(event.target.value)}
             rows={6}
-            className="min-h-0 flex-1 resize-none rounded-lg border-transparent bg-transparent px-2 py-1 text-body leading-relaxed text-note-text-primary placeholder:text-note-text-secondary focus-visible:border-accent-ring"
+            className="min-h-0 flex-1 resize-none rounded-lg border-none bg-transparent px-2 py-1 text-body leading-relaxed outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0"
           />
 
           <div className="shrink-0 py-1">

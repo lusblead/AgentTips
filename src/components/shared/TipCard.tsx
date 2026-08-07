@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, Maximize2, RotateCcw } from "lucide-react";
-import { noteColorClass } from "@/lib/palette";
+import { noteStyle, noteTextSecondaryStyle } from "@/lib/palette";
 import type { Agent, TipSummary } from "@/desktop-api/contract";
 
 export interface TipCardProps {
@@ -47,7 +47,8 @@ function AutoGrowTextarea({
       onChange={(event) => onChange(event.target.value)}
       onBlur={onBlur}
       rows={1}
-      className="w-full resize-none overflow-y-hidden break-words rounded-md border-transparent bg-transparent px-1 py-0.5 text-[13px] leading-relaxed text-note-text-secondary placeholder:text-note-text-secondary/60 focus:outline-none focus-visible:shadow-[0_0_0_2px_var(--accent-ring)]"
+      className="w-full resize-none overflow-y-hidden break-words rounded-md border-none bg-transparent px-1 py-0.5 text-[13px] leading-relaxed outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+      style={noteTextSecondaryStyle()}
     />
   );
 }
@@ -121,10 +122,11 @@ export function TipCard({
   return (
     <div
       data-testid="tip-card"
+      data-note-id={tip.id}
+      data-note-color={tip.colorKey}
       data-color={tip.colorKey}
-      className={`group relative flex min-h-[168px] w-full flex-col rounded-[var(--radius-note)] ${noteColorClass(
-        tip.colorKey,
-      )} p-3 text-note-text-primary shadow-[var(--note-shadow)] transition-all duration-[160ms] hover:-translate-y-px hover:shadow-[var(--note-shadow-hover)] focus-within:shadow-[var(--note-shadow-hover)] ${
+      style={noteStyle(tip.colorKey)}
+      className={`group relative flex min-h-[168px] w-full flex-col rounded-[14px] p-3 shadow-[0_6px_18px_rgba(15,23,42,0.07)] transition-all duration-[160ms] hover:-translate-y-px hover:shadow-[0_10px_28px_rgba(15,23,42,0.10)] focus-within:shadow-[0_0_0_1px_rgba(36,48,68,0.10),0_10px_28px_rgba(15,23,42,0.10)] ${
         leaving ? "translate-y-[-4px] scale-[0.985] opacity-0" : ""
       }`}
     >
@@ -134,7 +136,7 @@ export function TipCard({
           <button
             type="button"
             aria-label="恢复到首页"
-            className="rounded-md p-1 text-note-text-secondary transition-colors hover:bg-black/10 hover:text-note-text-primary focus:outline-none focus-visible:bg-black/10"
+            className="rounded-md p-1 transition-colors hover:bg-black/10 focus:outline-none focus-visible:bg-black/10"
             onClick={() => onRestoreUsed?.(tip.id)}
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -144,7 +146,7 @@ export function TipCard({
             <button
               type="button"
               aria-label="展开详情"
-              className="rounded-md p-1 text-note-text-secondary transition-colors hover:bg-black/10 hover:text-note-text-primary focus:outline-none focus-visible:bg-black/10"
+              className="rounded-md p-1 transition-colors hover:bg-black/10 focus:outline-none focus-visible:bg-black/10"
               onClick={onExpand}
             >
               <Maximize2 className="h-3.5 w-3.5" />
@@ -152,7 +154,7 @@ export function TipCard({
             <button
               type="button"
               aria-label="标记已使用"
-              className="rounded-md p-1 text-note-text-secondary transition-colors hover:bg-black/10 hover:text-note-text-primary focus:outline-none focus-visible:bg-black/10"
+              className="rounded-md p-1 transition-colors hover:bg-black/10 focus:outline-none focus-visible:bg-black/10"
               onClick={() => onMarkUsed?.(tip.id)}
             >
               <CircleCheck className="h-3.5 w-3.5" />
@@ -167,7 +169,7 @@ export function TipCard({
         onChange={(event) => handleTitleChange(event.target.value)}
         onBlur={() => flush(title, content)}
         placeholder="无标题"
-        className="w-full break-words rounded-md border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold text-note-text-primary placeholder:text-note-text-secondary/60 focus:outline-none focus-visible:shadow-[0_0_0_2px_var(--accent-ring)]"
+        className="w-full break-words rounded-md border-none bg-transparent px-1 py-0.5 text-[15px] font-semibold outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
       />
       <AutoGrowTextarea
         value={content}
@@ -177,8 +179,8 @@ export function TipCard({
       />
 
       <div className="mt-auto flex items-center justify-between pt-1">
-        <span className="line-clamp-1 text-[11px] text-note-text-secondary/80">{agentLabel}</span>
-        {saving && <span className="text-[11px] text-note-text-secondary">保存中…</span>}
+        <span className="line-clamp-1 text-[11px] opacity-70">{agentLabel}</span>
+        {saving && <span className="text-[11px] opacity-70">保存中…</span>}
       </div>
       {saveError && (
         <div className="flex items-center gap-2 pt-1 text-[11px] text-danger" role="alert">

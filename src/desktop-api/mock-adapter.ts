@@ -312,6 +312,76 @@ const SEED_TIPS: SeedTipBase[] = [
       { agentId: AGENT_IDS.cursor, autoAttach: true },
     ],
   },
+  {
+    id: "tip-13",
+    title: "便签墙隐喻",
+    content: "首页是桌面，Tip 是一张真实便签纸，颜色来自 10 色正式 Palette。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.trae, autoAttach: true }],
+  },
+  {
+    id: "tip-14",
+    title: "首页直接书写",
+    content: "看到文字点文字即可输入，650ms 自动保存，不出现传统输入框外框。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.cursor, autoAttach: true },
+      { agentId: AGENT_IDS.chatgpt, autoAttach: false },
+    ],
+  },
+  {
+    id: "tip-15",
+    title: "长便签向下生长",
+    content: "正文越来越多时，便签纸向下生长而不加宽；下方便签自动重新排布，形成不等高的便签墙。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.claudeCode, autoAttach: true }],
+  },
+  {
+    id: "tip-16",
+    title: "已使用与归档不同",
+    content: "used 表示完成使命收进盒子，archived 表示主动长期收纳，二者互不等同。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.codex, autoAttach: true },
+      { agentId: AGENT_IDS.opencode, autoAttach: true },
+    ],
+  },
+  {
+    id: "tip-17",
+    title: "颜色创建时分配",
+    content: "颜色建议排除最近两张便签的颜色，连续三张不会同色；保存后永久持久化。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.trae, autoAttach: true }],
+  },
+  {
+    id: "tip-18",
+    title: "Mark Used 收进盒子",
+    content: "hover 显示两个轻量操作：展开详情与标记已使用；标记后 160ms 动画离开首页。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.cursor, autoAttach: true },
+      { agentId: AGENT_IDS.claudeCode, autoAttach: true },
+    ],
+  },
+  {
+    id: "tip-19",
+    title: "详细编辑聚焦管理",
+    content:
+      "Detailed Editor 负责 Agent、autoAttach、复制与删除；正文区可滚动，Agent 与底部操作不被覆盖。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.opencode, autoAttach: true }],
+  },
+  {
+    id: "tip-20",
+    title: "颜色随机但稳定",
+    content:
+      "每次打开快捷窗口重新建议颜色；保存成功后颜色不变，重启、搜索、筛选、编辑、标记使用与恢复都不改变。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.codex, autoAttach: true },
+      { agentId: AGENT_IDS.trae, autoAttach: true },
+    ],
+  },
 ];
 
 function withSeedMeta(tip: SeedTipBase): SeedTip {

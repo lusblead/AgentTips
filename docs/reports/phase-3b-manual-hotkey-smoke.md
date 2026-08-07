@@ -3,17 +3,18 @@
 - 日期：2026-08-07
 - 基线：`phase-3a-window-runtime-baseline`（5968b11）
 - 构建：`pnpm tauri dev`（debug，`src-tauri/target/debug/agent-tips.exe`）
-- 状态：**PENDING USER MANUAL SMOKE** —— 自动运行时验收（`pnpm test:global-hotkey`）
-  已 PASS，但以下 6 项需要用户在真实常用应用中人工确认，尚未执行，不得视为 PASS。
+- 状态：**PASS — user manually verified configurable global hotkey across Chrome,
+  Cursor and Windows Terminal, immediate hotkey swap, old-key deactivation,
+  and persistence across restart.**
 
-## 需要人工验证的 6 项
+## 人工验证结果（用户实机确认）
 
-1. 在 Chrome 中按当前全局快捷键 → Quick Note 出现并聚焦。
-2. 在 Cursor 中按当前全局快捷键 → Quick Note 出现并聚焦。
-3. 在 Windows Terminal 中按当前全局快捷键 → Quick Note 出现并聚焦。
-4. 在 Settings 中修改快捷键 → 不重启立即生效。
-5. 旧快捷键立即失效。
-6. 退出并重新启动 → 新快捷键仍然生效。
+1. Chrome 中当前 Hotkey → Quick Note 出现并聚焦：PASS
+2. Cursor 中当前 Hotkey → Quick Note 出现并聚焦：PASS
+3. Windows Terminal 中当前 Hotkey → Quick Note 出现并聚焦：PASS
+4. Settings 修改 Hotkey 后无需重启立即生效：PASS
+5. OLD Hotkey 立即失效：PASS
+6. AgentTips 退出重启后 NEW Hotkey 仍然生效：PASS
 
 ## 自动化已覆盖（供参考）
 

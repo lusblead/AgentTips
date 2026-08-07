@@ -35,6 +35,16 @@
   --danger: oklch(0.58 0.19 25);
   --danger-subtle: oklch(0.95 0.028 25);
 
+  /* Pastel Palette（低饱和、可读、light 明显但柔和） */
+  --pastel-butter: oklch(0.94 0.05 90);
+  --pastel-peach: oklch(0.93 0.055 55);
+  --pastel-rose: oklch(0.93 0.05 15);
+  --pastel-lilac: oklch(0.93 0.045 300);
+  --pastel-sky: oklch(0.93 0.045 230);
+  --pastel-mint: oklch(0.94 0.05 165);
+  --pastel-sage: oklch(0.93 0.045 135);
+  --pastel-sand: oklch(0.94 0.04 75);
+
   /* Legacy aliases (kept for existing ui components) */
   --background: var(--surface-canvas);
   --foreground: var(--text-primary);
@@ -107,6 +117,16 @@
   --danger: oklch(0.68 0.18 25);
   --danger-subtle: oklch(0.26 0.045 25);
 
+  /* Dark 模式：对应深色 surface 映射，保持可读与克制 */
+  --pastel-butter: oklch(0.32 0.045 90);
+  --pastel-peach: oklch(0.31 0.05 55);
+  --pastel-rose: oklch(0.31 0.045 15);
+  --pastel-lilac: oklch(0.31 0.04 300);
+  --pastel-sky: oklch(0.31 0.04 230);
+  --pastel-mint: oklch(0.32 0.045 165);
+  --pastel-sage: oklch(0.31 0.04 135);
+  --pastel-sand: oklch(0.32 0.035 75);
+
   --background: var(--surface-canvas);
   --foreground: var(--text-primary);
   --card: var(--surface-primary);
@@ -153,6 +173,14 @@
   --color-accent-ring: var(--accent-ring);
   --color-danger: var(--danger);
   --color-danger-subtle: var(--danger-subtle);
+  --color-pastel-butter: var(--pastel-butter);
+  --color-pastel-peach: var(--pastel-peach);
+  --color-pastel-rose: var(--pastel-rose);
+  --color-pastel-lilac: var(--pastel-lilac);
+  --color-pastel-sky: var(--pastel-sky);
+  --color-pastel-mint: var(--pastel-mint);
+  --color-pastel-sage: var(--pastel-sage);
+  --color-pastel-sand: var(--pastel-sand);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

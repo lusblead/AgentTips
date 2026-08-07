@@ -63,11 +63,11 @@ test.describe("Phase 1.5 视觉截图", () => {
     expect(errors).toEqual([]);
   });
 
-  test("主窗口：有数据并选中第一条", async ({ page }) => {
+  test("主窗口：有数据（便签墙）", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main");
     await expect(page.getByText("修改前解释调用链")).toBeVisible();
-    await expect(page.getByLabel("标题")).toHaveValue("修改前解释调用链");
+    await expect(page.getByTestId("tip-grid")).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "main-window.png") });
     expect(errors).toEqual([]);
   });
@@ -75,16 +75,16 @@ test.describe("Phase 1.5 视觉截图", () => {
   test("主窗口：空态", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main&empty=1");
-    await expect(page.getByText("还没有提示")).toBeVisible();
+    await expect(page.getByText("还没有便签")).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "main-window-empty.png") });
     expect(errors).toEqual([]);
   });
 
-  test("主窗口：选中状态高亮", async ({ page }) => {
+  test("主窗口：hover 便签卡", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main");
-    const card = page.getByRole("button", { name: /修改前解释调用链/ }).first();
-    await expect(card).toHaveAttribute("aria-pressed", "true");
+    const card = page.getByTestId("tip-card").first();
+    await card.hover();
     await page.screenshot({ path: join(OUT_DIR, "main-window-selected.png") });
     expect(errors).toEqual([]);
   });

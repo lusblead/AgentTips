@@ -23,9 +23,9 @@ describe("Tip 创建链路（adapter 注入）", () => {
     quick.unmount();
 
     const library = render(<NoteLibraryWindow api={api} />);
-    await screen.findByLabelText("标题");
-    expect(screen.getAllByText("垂直链路新增提示").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByLabelText("标题")).toHaveValue("垂直链路新增提示");
+    expect((await screen.findAllByText("垂直链路新增提示")).length).toBeGreaterThanOrEqual(1);
+    await user.click(screen.getAllByTestId("tip-card")[0]);
+    expect(await screen.findByLabelText("标题")).toHaveValue("垂直链路新增提示");
     library.unmount();
   });
 

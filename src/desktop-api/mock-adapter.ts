@@ -209,6 +209,70 @@ const SEED_TIPS: SeedTip[] = [
     status: "archived",
     bindings: [{ agentId: AGENT_IDS.trae, autoAttach: false }],
   },
+  {
+    id: "tip-6",
+    title: "提交信息要可检索",
+    content:
+      "提交信息写明改动原因与影响面，避免只写 update/fix。团队需要能从 git log 快速定位变更动机。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.cursor, autoAttach: true },
+      { agentId: AGENT_IDS.opencode, autoAttach: true },
+      { agentId: AGENT_IDS.codex, autoAttach: false },
+    ],
+  },
+  {
+    id: "tip-7",
+    title: "迁移先备份",
+    content: "任何数据库迁移前先确认备份存在，迁移失败时保留原库不清空。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.claudeCode, autoAttach: true }],
+  },
+  {
+    id: "tip-8",
+    title: "错误信息面向用户",
+    content: "界面展示的错误要可理解，堆栈与原始 SQL 只写日志。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.chatgpt, autoAttach: true },
+      { agentId: AGENT_IDS.cursor, autoAttach: true },
+    ],
+  },
+  {
+    id: "tip-9",
+    title: "快捷键只触发窗口",
+    content: "全局快捷键回调只负责打开快捷窗口，不执行耗时数据库查询。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.trae, autoAttach: true }],
+  },
+  {
+    id: "tip-10",
+    title: "时间统一 UTC",
+    content: "数据库时间一律 UTC RFC3339，展示层再转换本地时区。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.codex, autoAttach: true },
+      { agentId: AGENT_IDS.claudeCode, autoAttach: true },
+    ],
+  },
+  {
+    id: "tip-11",
+    title: "不把 node.exe 当 Claude",
+    content:
+      "终端识别禁止以任意 node 进程作为 Claude Code 的唯一判断，必须匹配命令行与父子进程树。",
+    status: "active",
+    bindings: [{ agentId: AGENT_IDS.claudeCode, autoAttach: true }],
+  },
+  {
+    id: "tip-12",
+    title: "发布前跑全量验收",
+    content: "acceptance 脚本全绿且原生冒烟无阻断项才允许宣称 MVP 完成。",
+    status: "active",
+    bindings: [
+      { agentId: AGENT_IDS.opencode, autoAttach: true },
+      { agentId: AGENT_IDS.cursor, autoAttach: true },
+    ],
+  },
 ];
 
 const SEED_SETTINGS: AppSettings = {

@@ -1,54 +1,53 @@
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { pastelClass, pastelForTip } from "@/lib/palette";
 import type { Agent, TipSummary } from "@/desktop-api/contract";
-import { AgentChip } from "./AgentChip";
 
 export interface TipCardProps {
   tip: TipSummary;
   agents: Agent[];
-  selected: boolean;
   onClick: () => void;
 }
 
+const MAX_AGENT_LABELS = 2;
+
 /**
- * 轻量列表项（非独立卡片）：标题 + 摘要 + Agent 元数据。
- * selected：accent-subtle 底 + 左侧 2px accent 指示条，不使用大面积高饱和蓝。
+ * 便签卡：pastel 底 + subtle shadow + radius 建立层次，无数据库 row 感。
+ * 颜色由 Tip id 稳定映射；Agent 仅作为低权重 metadata。
  */
-export function TipCard({ tip, agents, selected, onClick }: TipCardProps) {
+export function TipCard({ tip, agents, onClick }: TipCardProps) {
+  const tone = pastelForTip(tip.id);
   const boundAgents = agents.filter((agent) => tip.agentIds.includes(agent.id));
+  const visibleAgents = boundAgents.slice(0, MAX_AGENT_LABELS);
+  const hiddenCount = boundAgents.length - visibleAgents.length;
+
+  const agentLabel = [
+    ...visibleAgents.map((agent) => agent.name),
+    hiddenCount > 0 ? `+${hiddenCount}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-pressed={selected}
-      className={cn(
-        "relative w-full rounded-md px-3 py-2 text-left transition-colors duration-[var(--duration-fast)] hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover",
-        selected && "bg-surface-selected hover:bg-surface-selected",
-      )}
+      className={`group flex h-[190px] w-full flex-col rounded-lg ${pastelClass(tone)} p-3 text-left text-text-primary shadow-floating transition-all duration-[150ms] hover:-translate-y-px hover:shadow-popover focus:outline-none focus-visible:shadow-popover focus-visible:ring-1 focus-visible:ring-accent-ring`}
+      data-testid="tip-card"
     >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent transition-opacity duration-[var(--duration-fast)]",
-          selected ? "opacity-100" : "opacity-0",
-        )}
-      />
-      <div className="flex items-center gap-2">
-        <span className="truncate text-body font-medium">{tip.title || "无标题"}</span>
+      <div className="flex items-start justify-between gap-2">
+        <span className="line-clamp-2 text-body font-semibold leading-snug">
+          {tip.title || "无标题"}
+        </span>
         {tip.status === "archived" && (
-          <Badge variant="secondary" className="ml-auto text-caption">
+          <Badge variant="secondary" className="shrink-0 text-caption">
             已归档
           </Badge>
         )}
       </div>
-      <p className="mt-0.5 line-clamp-1 text-secondary-size text-text-muted">{tip.content}</p>
-      {boundAgents.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {boundAgents.map((agent) => (
-            <AgentChip key={agent.id} name={agent.name} kind={agent.kind} muted />
-          ))}
-        </div>
-      )}
+      <p className="mt-2 line-clamp-4 text-secondary-size leading-relaxed text-text-secondary">
+        {tip.content}
+      </p>
+      <span className="mt-auto line-clamp-1 text-caption text-text-muted">{agentLabel}</span>
     </button>
   );
 }

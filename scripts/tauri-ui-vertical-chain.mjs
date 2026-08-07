@@ -195,7 +195,7 @@ class CdpClient {
   async waitWindow(windowKind) {
     const expressions = {
       "quick-note": `document.querySelector('textarea[aria-label="正文"]') !== null`,
-      main: `document.body.textContent.includes("提示库") && document.querySelector('input[aria-label="搜索便签"]') !== null`,
+      main: `document.body.textContent.includes("AgentTips")`,
       settings: `Boolean(document.querySelector('[data-testid="hotkey-display"]'))`,
       reminder: `document.querySelector('[role="alert"]') !== null`,
     };
@@ -317,8 +317,8 @@ async function setInput(client, ariaLabel, text) {
 
 async function setDetailTextarea(client, text) {
   await client.evaluate(`(() => {
-    const el = document.querySelector('#detail-content');
-    if (!el) throw new Error('未找到详情正文 #detail-content');
+    const el = document.querySelector('textarea[aria-label="正文"]');
+    if (!el) throw new Error('未找到详情正文');
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     setter.call(el, ${JSON.stringify(text)});
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -326,7 +326,7 @@ async function setDetailTextarea(client, text) {
 }
 
 async function detailContent(client) {
-  return client.evaluate(`document.querySelector('#detail-content')?.value ?? null`);
+  return client.evaluate(`document.querySelector('textarea[aria-label="正文"]')?.value ?? null`);
 }
 
 async function clickButton(client, text) {
@@ -367,21 +367,6 @@ async function realClick(client, selector) {
     clickCount: 1,
   });
   await sleep(200);
-}
-
-async function clickDialogButton(client, text) {
-  const ok = await client.evaluate(`(() => {
-    const dialog = document.querySelector('[role="dialog"]');
-    if (!dialog) return false;
-    const buttons = [...dialog.querySelectorAll('button')];
-    const target = buttons.find((b) => (b.textContent ?? '').trim() === ${JSON.stringify(text)} && !b.disabled);
-    if (!target) return false;
-    target.click();
-    return true;
-  })()`);
-  if (!ok) {
-    throw new Error(`未找到对话框按钮: ${text}`);
-  }
 }
 
 async function clickByLabel(client, label) {
@@ -461,13 +446,19 @@ async function setSwitch(client, label, checked) {
 }
 
 async function openTipByTitle(client, title) {
+  const searchOpen = await client.evaluate(
+    `Boolean(document.querySelector('input[aria-label="搜索便签"]'))`,
+  );
+  if (!searchOpen) {
+    await clickByLabel(client, "搜索");
+  }
   await setInput(client, "搜索便签", title);
   await client.waitForExpression(
-    `[...document.querySelectorAll('[data-window="main"] button[aria-pressed]')].some((b) => (b.textContent ?? '').includes(${JSON.stringify(title)}))`,
+    `[...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].some((b) => (b.textContent ?? '').includes(${JSON.stringify(title)}))`,
     `卡片 ${title}`,
   );
   const ok = await client.evaluate(`(() => {
-    const cards = [...document.querySelectorAll('[data-window="main"] button[aria-pressed]')];
+    const cards = [...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')];
     const target = cards.find((b) => (b.textContent ?? '').includes(${JSON.stringify(title)}));
     if (!target) return false;
     target.click();
@@ -478,14 +469,14 @@ async function openTipByTitle(client, title) {
   }
   try {
     await client.waitForExpression(
-      `document.querySelector('#detail-title') !== null`,
+      `document.querySelector('[aria-label="标题"]') !== null`,
       "详情打开",
       5_000,
     );
   } catch (error) {
     const diag = await client.evaluate(
       `JSON.stringify({
-        cards: [...document.querySelectorAll('[data-window="main"] button[aria-pressed]')].map((b) => b.getAttribute('aria-pressed') + ':' + b.textContent.slice(0, 30)),
+        cards: [...document.querySelectorAll('[data-window="main"] [data-testid="tip-card"]')].map((b) => b.textContent.slice(0, 30)),
         labels: [...document.querySelectorAll('input')].map((i) => i.getAttribute('aria-label')),
         body: document.body.textContent.slice(0, 150),
       })`,
@@ -600,7 +591,7 @@ async function run() {
     console.log("update via UI ok ✓ (正文已改、绑定替换为仅 Cursor、autoAttach=false)");
 
     // ---- UI 删除（overflow menu）----
-    await realClick(client, '[aria-label="更多操作"]');
+    await realClick(client, '[role="dialog"] [aria-label="更多操作"]');
     await client.waitForExpression(
       `[...document.querySelectorAll('[role="menuitem"]')].some((el) => (el.textContent ?? '').includes('删除'))`,
       "删除菜单项",
@@ -610,11 +601,36 @@ async function run() {
       const target = items.find((el) => (el.textContent ?? '').includes('删除'));
       target?.click();
     })()`);
-    await client.waitForExpression(`Boolean(document.querySelector('[role="dialog"]'))`, "确认对话框");
-    await clickDialogButton(client, "删除");
     await client.waitForExpression(
-      `document.body.textContent.includes("没有匹配的提示")`,
-      "删除后搜索无结果",
+      `document.body.textContent.includes("删除后无法恢复")`,
+      "确认对话框",
+    );
+    const confirmed = await client.evaluate(`(() => {
+      const dialogs = [...document.querySelectorAll('[role="dialog"]')];
+      const confirm = dialogs.find((d) => d.textContent.includes('删除后无法恢复'));
+      if (!confirm) return false;
+      const button = [...confirm.querySelectorAll('button')].find(
+        (b) => b.textContent.trim() === '删除' && !b.disabled,
+      );
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!confirmed) {
+      throw new Error("未找到删除确认按钮");
+    }
+    await sleep(600);
+    const deleteDiag = await client.evaluate(`JSON.stringify({
+      href: location.href,
+      len: document.body.textContent.length,
+      head: document.body.textContent.slice(0, 200),
+      ready: document.readyState,
+    })`);
+    console.log("DELETE_DIAG:", deleteDiag);
+    console.log("DELETE_ERRORS:", JSON.stringify(client.errors.slice(-5)));
+    await client.waitForExpression(
+      `document.body.textContent.includes("还没有便签")`,
+      "删除后空态",
       20_000,
     );
     console.log("delete via UI ok ✓");

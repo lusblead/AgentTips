@@ -9,7 +9,7 @@ describe("窗口路由", () => {
   it("默认进入主管理窗口", async () => {
     visit("/");
     render(<App />);
-    expect(await screen.findByText("提示库")).toBeInTheDocument();
+    expect(await screen.findByText("AgentTips")).toBeInTheDocument();
     expect(screen.getByText("修改前解释调用链")).toBeInTheDocument();
   });
 
@@ -36,7 +36,7 @@ describe("窗口路由", () => {
   it("popstate 事件可切换窗口", async () => {
     visit("/?window=main");
     const { unmount } = render(<App />);
-    await screen.findByText("提示库");
+    await screen.findByText("AgentTips");
     window.history.pushState({}, "", "/?window=quick-note");
     const { getWindowContext } = await import("@/desktop-api");
     expect(getWindowContext().kind).toBe("quick-note");
@@ -68,7 +68,7 @@ describe("UI 开发文字清理", () => {
       visit(path);
       const { unmount } = render(<App />);
       if (path === "/?window=main") {
-        await screen.findByText("提示库");
+        await screen.findByText("AgentTips");
       } else if (path === "/?window=quick-note") {
         await screen.findByText("新建提示");
       } else if (path === "/?window=settings") {

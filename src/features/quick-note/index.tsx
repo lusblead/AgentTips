@@ -109,7 +109,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-surface-canvas text-text-primary"
+      className="flex h-screen flex-col overflow-hidden bg-pastel-butter text-text-primary"
       data-window="quick-note"
     >
       <div className="flex shrink-0 items-center justify-between px-4 py-2">

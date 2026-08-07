@@ -11,7 +11,7 @@ test.describe("布局溢出检查", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test("主窗口三栏均在视口内", async ({ page }) => {
+  test("主窗口 Grid 无横向溢出", async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 760 });
     await page.goto("/?window=main");
     await expect(page.getByText("修改前解释调用链")).toBeVisible();
@@ -19,12 +19,10 @@ test.describe("布局溢出检查", () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
-    const mainBox = await page.getByTestId("main-layout").boundingBox();
-    expect(mainBox).not.toBeNull();
-    if (mainBox) {
-      expect(mainBox.x + mainBox.width).toBeLessThanOrEqual(1180);
-      expect(mainBox.y + mainBox.height).toBeLessThanOrEqual(760);
-    }
+    const grid = page.getByTestId("tip-grid");
+    await expect(grid).toBeVisible();
+    const gridOverflow = await grid.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(gridOverflow).toBeLessThanOrEqual(0);
   });
 
   test("提醒窗口卡片在视口内", async ({ page }) => {

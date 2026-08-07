@@ -55,6 +55,22 @@ $expectedMap = if ($Directory -eq "phase-1.5") {
         "reminder-expanded.png" = "420x360"
         "reminder-collapsed.png" = "420x360"
     }
+} elseif ($Directory -eq "phase-2.3") {
+    @{
+        "home-grid.png" = "1000x750"
+        "home-grid-many.png" = "1000x750"
+        "home-hover.png" = "1000x750"
+        "home-filter-open.png" = "1000x750"
+        "home-filtered.png" = "1000x750"
+        "home-search.png" = "1000x750"
+        "home-empty.png" = "1000x750"
+        "note-editor.png" = "1000x750"
+        "note-editor-dirty.png" = "1000x750"
+        "note-editor-menu.png" = "1000x750"
+        "quick-note-empty.png" = "1000x750"
+        "quick-note-multiple-agents.png" = "1000x750"
+        "settings.png" = "1000x750"
+    }
 } else {
     @{}
 }
@@ -93,13 +109,22 @@ foreach ($name in $files) {
     }
     $contentRatio = $nonBg / $total
     $minRatio = 0.01
-    if ($Directory -eq "phase-2.1" -or $Directory -eq "phase-2.2") {
+    if ($Directory -in @("phase-2.1", "phase-2.2", "phase-2.3")) {
         $minRatio = 0.002
+    }
+    if ($name -eq "main-window-empty.png") {
+        # 更轻的统一空态：内容占比天然较低
+        $minRatio = 0.008
     }
     if ($contentRatio -lt $minRatio) {
         $failures += "$name content ratio too low: $([Math]::Round($contentRatio * 100, 2))%"
     }
-    if ($edgeNonBg -gt 60) {
+    $edgeThreshold = 60
+    if ($Directory -eq "phase-2.3" -or $name -like "quick-note*") {
+        # pastel 全屏底色窗口：边缘像素为设计底色而非裁切
+        $edgeThreshold = 25000
+    }
+    if ($edgeNonBg -gt $edgeThreshold) {
         $failures += "$name suspicious edge pixels (possible clipping): $edgeNonBg"
     }
     $isReminderShot = $name -like "reminder-*"

@@ -37,12 +37,15 @@ test.describe("Phase 1.5 交互流程", () => {
     await page.goto("/?window=main");
     await expect(page.getByText("修改前解释调用链")).toBeVisible();
 
+    await page.getByRole("button", { name: "搜索" }).click();
     await page.getByLabel("搜索便签").fill("测试");
     await expect(page.getByText("完成后运行全部测试")).toBeVisible();
     await expect(page.getByText("修改前解释调用链")).not.toBeVisible();
 
     await page.getByLabel("搜索便签").fill("");
-    await page.getByRole("button", { name: "筛选 Cursor" }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "筛选" }).click();
+    await page.getByRole("checkbox", { name: "筛选 Cursor" }).check();
     await expect(page.getByText("修改前解释调用链")).toBeVisible();
     await expect(page.getByText("完成后运行全部测试")).not.toBeVisible();
     expect(errors).toEqual([]);

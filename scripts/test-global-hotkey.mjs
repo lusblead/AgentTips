@@ -290,11 +290,28 @@ function focusNotepad() {
   const code = `
 import ctypes, ctypes.wintypes as w, time
 u = ctypes.windll.user32
+def click(x, y):
+    # SetCursorPos + mouse_event：物理坐标直通，系统按 DPI 自动虚拟化
+    u.SetCursorPos(x, y)
+    time.sleep(0.15)
+    u.mouse_event(0x0002, 0, 0, 0, 0)
+    time.sleep(0.1)
+    u.mouse_event(0x0004, 0, 0, 0, 0)
+    time.sleep(0.15)
 for _ in range(20):
     hwnd = u.FindWindowW("Notepad", None)
     if hwnd:
         u.ShowWindow(hwnd, 9)
+        # ALT 键技巧绕过 Windows 前台锁（SetForegroundWindow 限制）
+        u.keybd_event(0x12, 0, 0, 0)
         u.SetForegroundWindow(hwnd)
+        u.keybd_event(0x12, 0, 2, 0)
+        r = w.RECT()
+        u.GetWindowRect(hwnd, ctypes.byref(r))
+        cx = (r.left + r.right) // 2
+        cy = (r.top + r.bottom) // 2
+        # 真实鼠标点击 Notepad 客户区，绕过 SetForegroundWindow 前台锁
+        click(cx, cy)
         time.sleep(0.3)
         print("focused")
         raise SystemExit
@@ -308,6 +325,91 @@ print("notepad not found")
   if (!result.stdout.includes("focused")) {
     throw new Error(`focusNotepad failed: ${result.stdout} ${result.stderr}`);
   }
+}
+
+/** 返回当前前台窗口信息：{ hwnd, className, title }。 */
+function getForegroundInfo() {
+  const code = `
+import ctypes, ctypes.wintypes as w
+u = ctypes.windll.user32
+hwnd = u.GetForegroundWindow()
+cls = ctypes.create_unicode_buffer(256)
+u.GetClassNameW(hwnd, cls, 256)
+length = u.GetWindowTextLengthW(hwnd)
+title = ctypes.create_unicode_buffer(length + 1)
+u.GetWindowTextW(hwnd, title, length + 1)
+print(f"{hwnd}|{cls.value}|{title.value}")
+`;
+  const result = spawnSync("python", ["-X", "utf8", "-c", code], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) throw new Error(`getForegroundInfo failed: ${result.stderr}`);
+  const [hwnd, className, title] = result.stdout.trim().split("|");
+  return { hwnd, className, title };
+}
+
+/** 读取指定顶层窗口的扩展样式，判断 WS_EX_TOPMOST (0x8) 是否置顶。 */
+function isTopmostByHwnd(hwnd) {
+  const code = `
+import ctypes, ctypes.wintypes as w, sys
+u = ctypes.windll.user32
+hwnd = ${hwnd}
+ex = u.GetWindowLongW(hwnd, -20)  # GWL_EXSTYLE
+print(bool(ex & 0x8))
+`;
+  const result = spawnSync("python", ["-X", "utf8", "-c", code], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) throw new Error(`isTopmostByHwnd failed: ${result.stderr}`);
+  return result.stdout.trim() === "True";
+}
+
+/** 获取指定标题/类名窗口的 hwnd；找不到返回 null。 */
+function findWindowHwnd(className, title) {
+  const code = `
+import ctypes, ctypes.wintypes as w, sys
+u = ctypes.windll.user32
+cls = ${JSON.stringify(className ?? null)}
+title = ${JSON.stringify(title ?? null)}
+hwnd = u.FindWindowW(cls, title)
+print(hwnd if hwnd else 0)
+`;
+  const result = spawnSync("python", ["-X", "utf8", "-c", code], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) throw new Error(`findWindowHwnd failed: ${result.stderr}`);
+  return Number(result.stdout.trim() || 0);
+}
+
+/** 最小化指定窗口（SW_MINIMIZE），用于验证 Hotkey 唤醒恢复。 */
+function minimizeWindowByHwnd(hwnd) {
+  const code = `
+import ctypes, ctypes.wintypes as w
+u = ctypes.windll.user32
+u.ShowWindow(${hwnd}, 6)
+`;
+  const result = spawnSync("python", ["-X", "utf8", "-c", code], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) throw new Error(`minimizeWindowByHwnd failed: ${result.stderr}`);
+}
+
+function isMinimizedByHwnd(hwnd) {
+  const code = `
+import ctypes, ctypes.wintypes as w
+u = ctypes.windll.user32
+print(bool(u.IsIconic(${hwnd})))
+`;
+  const result = spawnSync("python", ["-X", "utf8", "-c", code], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) throw new Error(`isMinimizedByHwnd failed: ${result.stderr}`);
+  return result.stdout.trim() === "True";
 }
 
 function launchNotepad() {
@@ -480,6 +582,66 @@ async function run() {
     }
     if (targetCount > 3) throw new Error(`unexpected window count: ${targetCount}`);
     console.log("E. 重复触发仍 1 个 Quick Note，文本保留  PASS");
+
+    // B. 点击外部应用 → 外部应用成为前台，Quick Note 仍在但不再覆盖最顶层
+    focusNotepad();
+    await sleep(500);
+    const fgAfterExternal = getForegroundInfo();
+    if (fgAfterExternal.className !== "Notepad") {
+      throw new Error(`Notepad 未成为前台: ${JSON.stringify(fgAfterExternal)}`);
+    }
+    if (!(await isVisible(quick))) {
+      throw new Error("Quick Note 在外部应用获得焦点后不应隐藏");
+    }
+    const quickHwnd = findWindowHwnd("Tauri Window", "新建提示");
+    if (!quickHwnd) throw new Error("找不到 Quick Note 窗口句柄");
+    if (isTopmostByHwnd(quickHwnd)) {
+      throw new Error("Quick Note 仍为 topmost，层级行为未修复");
+    }
+    console.log("B. 点击 Notepad 后外部应用前台，Quick Note 保留且非 topmost  PASS");
+
+    // C. 再次 Hotkey → 同一个 Quick Note 回到前台，草稿保留
+    sendHotkey(0x7b);
+    await sleep(1_000);
+    const fgAfterHotkey = getForegroundInfo();
+    if (fgAfterHotkey.title !== "新建提示") {
+      throw new Error(`Hotkey 后 Quick Note 未回到前台: ${JSON.stringify(fgAfterHotkey)}`);
+    }
+    const textAfterReturn = await quick.evaluate(
+      `document.querySelector('textarea[aria-label="正文"]')?.value ?? null`,
+    );
+    if (textAfterReturn !== "global hotkey runtime test") {
+      throw new Error(`再次唤醒后草稿丢失: ${textAfterReturn}`);
+    }
+    console.log("C. 再次 Hotkey 同一窗口回到前台，草稿保留  PASS");
+
+    // D. 最小化 Quick Note → Hotkey → 同一窗口恢复并获得焦点
+    const quickHwndD = findWindowHwnd("Tauri Window", "新建提示");
+    minimizeWindowByHwnd(quickHwndD);
+    await sleep(500);
+    if (!isMinimizedByHwnd(quickHwndD)) {
+      throw new Error("Quick Note 未进入最小化状态");
+    }
+    focusNotepad();
+    sendHotkey(0x7b);
+    await sleep(1_000);
+    if (isMinimizedByHwnd(quickHwndD)) {
+      throw new Error("Hotkey 后 Quick Note 仍处于最小化");
+    }
+    if (!(await isVisible(quick))) {
+      throw new Error("Hotkey 后 Quick Note 不可见");
+    }
+    const fgAfterUnminimize = getForegroundInfo();
+    if (fgAfterUnminimize.title !== "新建提示") {
+      throw new Error(`Hotkey 后 Quick Note 未聚焦: ${JSON.stringify(fgAfterUnminimize)}`);
+    }
+    const textAfterUnminimize = await quick.evaluate(
+      `document.querySelector('textarea[aria-label="正文"]')?.value ?? null`,
+    );
+    if (textAfterUnminimize !== "global hotkey runtime test") {
+      throw new Error(`最小化唤醒后草稿丢失: ${textAfterUnminimize}`);
+    }
+    console.log("D. 最小化 Quick Note → Hotkey 恢复同一窗口并聚焦，草稿保留  PASS");
 
     // F. 关闭 Quick Note
     await hideWindow(quick, "quick-note");

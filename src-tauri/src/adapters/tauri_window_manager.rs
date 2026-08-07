@@ -60,7 +60,7 @@ impl TauriWindowManager {
             .decorations(true)
             .center();
         if label == WindowLabel::QuickNote {
-            builder = builder.max_inner_size(820.0, 680.0).always_on_top(true);
+            builder = builder.max_inner_size(820.0, 680.0);
         }
         let window = builder
             .build()
@@ -72,6 +72,12 @@ impl TauriWindowManager {
 impl WindowManagerPort for TauriWindowManager {
     fn show(&self, label: WindowLabel) -> AppResult<()> {
         let window = self.ensure(label)?;
+        // 若窗口处于最小化状态，先恢复（unminimize），保证 Hotkey/Tray 唤醒后可见。
+        if window.is_minimized().unwrap_or(false) {
+            window
+                .unminimize()
+                .map_err(|e| AppError::Window(e.to_string()))?;
+        }
         let was_visible = window.is_visible().unwrap_or(false);
         if was_visible {
             window

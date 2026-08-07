@@ -131,7 +131,7 @@ export function moveWindowsToNativeDisplay({ titles = [], className = null } = {
     return moveWindowsAwayFromCursor({ titles, className });
   }
   const titleList = titles.map((t) => JSON.stringify(t)).join(",");
-  const classExpr = className ? JSON.stringify(className) : "null";
+  const classExpr = className ? JSON.stringify(className) : "None";
   const code = `
 import ctypes, ctypes.wintypes as w
 u = ctypes.windll.user32
@@ -230,7 +230,7 @@ export function killProcessTree(rootPid) {
  */
 export function moveWindowsAwayFromCursor({ titles = [], className = null } = {}) {
   const titleList = titles.map((t) => JSON.stringify(t)).join(",");
-  const classExpr = className ? JSON.stringify(className) : "null";
+  const classExpr = className ? JSON.stringify(className) : "None";
   const code = `
 import ctypes, ctypes.wintypes as w, json
 u = ctypes.windll.user32
@@ -318,7 +318,7 @@ print(moved)
 /** 将匹配的顶层窗口最小化（SW_MINIMIZE），减少测试窗口对用户的视觉干扰。 */
 export function minimizeWindows({ titles = [], className = null } = {}) {
   const titleList = titles.map((t) => JSON.stringify(t)).join(",");
-  const classExpr = className ? JSON.stringify(className) : "null";
+  const classExpr = className ? JSON.stringify(className) : "None";
   const code = `
 import ctypes, ctypes.wintypes as w
 u = ctypes.windll.user32

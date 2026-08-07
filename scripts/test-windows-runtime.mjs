@@ -332,21 +332,23 @@ async function assertAdapter(client) {
 }
 
 async function allWindowLabels(client) {
-  return client.evaluate(
+  return client.evaluateRetry(
     `window.__TAURI_INTERNALS__.invoke('plugin:window|get_all_windows')`,
   );
 }
 
 async function isVisible(client) {
   return Boolean(
-    await client.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible')`),
+    await client.evaluateRetry(
+      `window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible')`,
+    ),
   );
 }
 
 async function cssViewport(client) {
-  return client.evaluate(`JSON.stringify({ w: window.innerWidth, h: window.innerHeight })`).then(
-    (s) => JSON.parse(s),
-  );
+  return client
+    .evaluateRetry(`JSON.stringify({ w: window.innerWidth, h: window.innerHeight })`)
+    .then((s) => JSON.parse(s));
 }
 
 function assertApprox(actual, expected, tolerance, label) {
@@ -356,7 +358,7 @@ function assertApprox(actual, expected, tolerance, label) {
 }
 
 async function setTextarea(client, ariaLabel, text) {
-  await client.evaluate(`(() => {
+  await client.evaluateRetry(`(() => {
     const el = document.querySelector('textarea[aria-label=${JSON.stringify(ariaLabel)}]');
     if (!el) throw new Error('textarea not found: ' + ${JSON.stringify(ariaLabel)});
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -366,7 +368,7 @@ async function setTextarea(client, ariaLabel, text) {
 }
 
 async function clickButton(client, text) {
-  const ok = await client.evaluate(`(() => {
+  const ok = await client.evaluateRetry(`(() => {
     const buttons = [...document.querySelectorAll('button')];
     const target = buttons.find(
       (b) => (b.textContent ?? '').trim().includes(${JSON.stringify(text)}) && !b.disabled,

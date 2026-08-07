@@ -29,6 +29,7 @@ async function setup(page: Page, viewport: { width: number; height: number }, ur
 
 test.beforeAll(() => {
   mkdirSync(OUT_DIR, { recursive: true });
+  mkdirSync(join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.2"), { recursive: true });
 });
 
 test.describe("Phase 1.5 视觉截图", () => {
@@ -129,6 +130,36 @@ test.describe("Phase 1.5 视觉截图", () => {
     await expect(page.getByText("检测到 Ctrl + Alt + K")).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("当前快捷键仍为 Ctrl + F12");
     await page.screenshot({ path: join(OUT_DIR, "settings-hotkey-invalid.png") });
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("Phase 2.2 补充截图（浏览器 Mock）", () => {
+  const PHASE22 = join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.2");
+
+  test("提醒窗口：展开", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.setViewportSize({ width: 420, height: 360 });
+    await page.goto("/?window=reminder");
+    await expect(page.getByRole("dialog", { name: "Cursor 提醒" })).toBeVisible();
+    await page.screenshot({ path: join(PHASE22, "reminder-expanded.png") });
+    expect(errors).toEqual([]);
+  });
+
+  test("提醒窗口：胶囊", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.setViewportSize({ width: 420, height: 360 });
+    await page.goto("/?window=reminder&demo=collapsed");
+    await expect(page.getByText("Cursor · 3 条提示")).toBeVisible();
+    await page.screenshot({ path: join(PHASE22, "reminder-collapsed.png") });
     expect(errors).toEqual([]);
   });
 });

@@ -17,6 +17,15 @@ test.describe("Phase 1.5 交互流程", () => {
     const textarea = page.getByLabel("正文");
     await expect(textarea).toHaveValue("");
     await textarea.fill("通过快捷键保存的便签");
+    await page.getByRole("button", { name: /添加 Agent/ }).click();
+    await page.getByRole("menuitem", { name: /Cursor/ }).click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('[role="menu"]') &&
+        Boolean(document.querySelector('[aria-label="Cursor 默认携带"]')),
+    );
+    await page.waitForTimeout(120);
+    await textarea.click();
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("status")).toHaveText("已保存");
     await expect(textarea).toHaveValue("");

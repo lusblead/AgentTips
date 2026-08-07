@@ -36,6 +36,8 @@ describe("Tip 创建链路（adapter 注入）", () => {
     render(<QuickNoteWindow api={api} onClose={() => undefined} />);
     await screen.findByRole("button", { name: "添加 Agent" });
     await user.type(screen.getByLabelText("正文"), "失败后仍保留");
+    await user.click(screen.getByRole("button", { name: /添加 Agent/ }));
+    await user.click(await screen.findByRole("menuitem", { name: /Cursor/ }));
     await user.click(screen.getByRole("button", { name: "保存" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/模拟保存失败/);
     expect(screen.getByLabelText("正文")).toHaveValue("失败后仍保留");

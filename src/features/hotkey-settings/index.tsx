@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Keyboard, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { desktopErrorMessage } from "@/desktop-api/contract";
+import { cn } from "@/lib/utils";
+import { desktopErrorMessage, ERROR_CODES } from "@/desktop-api/contract";
 import type {
   DesktopApi,
   HotkeyBinding,
@@ -11,7 +11,6 @@ import type {
   HotkeyPreviewResult,
 } from "@/desktop-api/contract";
 import { hotkeyDisplayKey } from "@/desktop-api";
-import { cn } from "@/lib/utils";
 
 export interface HotkeyRecorderProps {
   api: DesktopApi;
@@ -47,6 +46,7 @@ function detectedLabelFromEvent(event: KeyboardEvent): string {
 /**
  * 快捷键录制控件：只接受 Ctrl + 单个非修饰键。
  * 录制状态与已保存状态分离展示；非法/冲突时保留原快捷键。
+ * 尚未接入系统注册时，展示中性占位文案而非错误。
  */
 export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
   const [current, setCurrent] = useState<HotkeyBinding>(initial);
@@ -109,8 +109,20 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
           setFeedback(reasonText(result));
         }
       } catch (err) {
-        setState("error");
-        setFeedback(desktopErrorMessage(err));
+        const message = desktopErrorMessage(err);
+        const isUnavailable =
+          typeof err === "object" &&
+          err !== null &&
+          (err as { code?: string }).code === ERROR_CODES.INTERNAL_ERROR &&
+          message.includes("尚未实现");
+        if (isUnavailable) {
+          // 中性占位：能力将在系统功能启用后生效，不属于错误
+          setState("idle");
+          setFeedback("该能力将在系统功能启用后生效");
+        } else {
+          setState("error");
+          setFeedback(message);
+        }
       } finally {
         setPending(false);
       }
@@ -147,9 +159,9 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
   return (
     <div ref={rootRef} className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <span className="w-24 shrink-0 text-aux text-muted-foreground">当前快捷键</span>
+        <span className="w-24 shrink-0 text-secondary-size text-text-muted">当前快捷键</span>
         <span
-          className="flex-1 rounded-md border bg-card px-3 py-2 font-medium"
+          className="flex-1 rounded-md border border-border-default bg-surface-primary px-3 py-2 font-medium"
           data-testid="hotkey-display"
         >
           {current.displayLabel}
@@ -159,16 +171,16 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
       <div
         className={cn(
           "flex flex-col gap-2 rounded-lg border p-3 transition-colors duration-[var(--duration-fast)]",
-          recording && "border-primary/60 bg-primary/5 ring-1 ring-primary/30",
-          state === "error" && "border-destructive/60 bg-destructive/5",
+          recording && "border-accent-ring bg-accent-subtle",
+          state === "error" && "border-danger/60 bg-danger-subtle",
           state === "success" && "border-success/60 bg-success/5",
         )}
         aria-live="polite"
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Keyboard className="h-4 w-4 text-muted-foreground" />
-            <span className="text-tip font-medium">{recording ? "正在录制" : "点击重新录制"}</span>
+            <Keyboard className="h-4 w-4 text-text-muted" />
+            <span className="text-body font-medium">{recording ? "正在录制" : "点击重新录制"}</span>
           </div>
           <Button
             type="button"
@@ -193,9 +205,9 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
         </div>
 
         {recording && (
-          <p className="text-aux text-muted-foreground">
+          <p className="text-secondary-size text-text-muted">
             请按下 Ctrl + 一个按键 ·{" "}
-            <kbd className="rounded-sm border bg-card px-1 py-0.5 font-sans text-[11px] shadow-sm">
+            <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
               Esc
             </kbd>{" "}
             取消
@@ -207,15 +219,19 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
             <Badge variant={state === "error" ? "destructive" : "default"}>
               检测到 {detectedLabel}
             </Badge>
-            {pending && <span className="text-aux text-muted-foreground">校验中…</span>}
+            {pending && <span className="text-secondary-size text-text-muted">校验中…</span>}
           </div>
         )}
 
         {feedback && (
           <p
             className={cn(
-              "text-aux",
-              state === "success" ? "text-success" : state === "error" ? "text-destructive" : "",
+              "text-secondary-size",
+              state === "success"
+                ? "text-success"
+                : state === "error"
+                  ? "text-danger"
+                  : "text-text-muted",
             )}
             role={state === "error" ? "alert" : "status"}
           >
@@ -228,11 +244,20 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
   );
 }
 
+const SECTIONS: Array<{ id: string; label: string; disabled?: boolean }> = [
+  { id: "hotkey", label: "快捷键" },
+  { id: "regular", label: "常规", disabled: true },
+  { id: "reminder", label: "提醒", disabled: true },
+  { id: "data", label: "数据", disabled: true },
+  { id: "about", label: "关于", disabled: true },
+];
+
 export interface HotkeySettingsWindowProps {
   api: DesktopApi;
 }
 
 export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps) {
+  const [section, setSection] = useState<string>("hotkey");
   const [hotkey, setHotkey] = useState<HotkeyBinding | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -253,41 +278,64 @@ export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps)
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
+      className="flex h-screen flex-col overflow-hidden bg-surface-canvas text-text-primary"
       data-window="settings"
     >
-      <header className="shrink-0 border-b px-4 py-2.5">
-        <h2 className="text-heading font-semibold tracking-tight">设置</h2>
+      <header className="shrink-0 border-b border-border-subtle px-4 py-2.5">
+        <h2 className="text-page-title font-semibold tracking-tight">设置</h2>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <Card className="mx-auto w-full max-w-[640px]">
-          <CardContent className="flex flex-col gap-4 p-4">
-            {loadError ? (
-              <p className="text-aux text-destructive" role="alert">
-                {loadError}
-              </p>
-            ) : hotkey ? (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium">全局新建快捷键</span>
+      <div className="flex min-h-0 flex-1">
+        <nav className="w-44 shrink-0 bg-surface-secondary p-2" aria-label="设置导航">
+          <div className="flex flex-col gap-0.5">
+            {SECTIONS.map((item) => (
+              <Button
+                key={item.id}
+                variant={section === item.id ? "secondary" : "ghost"}
+                size="sm"
+                className="justify-start"
+                disabled={item.disabled}
+                onClick={() => setSection(item.id)}
+              >
+                {item.label}
+                {item.disabled && (
+                  <span className="ml-auto text-caption text-text-disabled">即将提供</span>
+                )}
+              </Button>
+            ))}
+          </div>
+        </nav>
+        <section className="min-w-0 flex-1 overflow-y-auto bg-surface-primary p-5">
+          {section === "hotkey" ? (
+            <div className="mx-auto flex max-w-xl flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <h3 className="text-section font-semibold">全局新建快捷键</h3>
+                <p className="text-secondary-size text-text-muted">快捷键必须是 Ctrl + 一个按键</p>
+              </div>
+              {loadError ? (
+                <p className="text-secondary-size text-danger" role="alert">
+                  {loadError}
+                </p>
+              ) : hotkey ? (
+                <>
                   <HotkeyRecorder api={api} initial={hotkey} />
-                </div>
-                <div className="flex flex-col gap-1 rounded-md bg-muted/50 px-3 py-2 text-aux text-muted-foreground">
-                  <p>快捷键必须是 Ctrl + 一个按键</p>
-                  <p>
+                  <p className="text-secondary-size text-text-muted">
                     录制中按{" "}
-                    <kbd className="rounded-sm border bg-card px-1 py-0.5 font-sans text-[11px] shadow-sm">
+                    <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
                       Esc
                     </kbd>{" "}
                     可取消
                   </p>
-                </div>
-              </>
-            ) : (
-              <p className="text-aux text-muted-foreground">加载中…</p>
-            )}
-          </CardContent>
-        </Card>
+                </>
+              ) : (
+                <p className="text-secondary-size text-text-muted">加载中…</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-secondary-size text-text-muted">该设置项即将提供</p>
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );

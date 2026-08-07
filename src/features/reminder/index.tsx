@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, ExternalLink, X } from "lucide-react";
+import { BellOff, ChevronDown, ChevronUp, ExternalLink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { desktopErrorMessage, type DesktopApi, type ReminderPreview } from "@/desktop-api/contract";
+import {
+  desktopErrorMessage,
+  ERROR_CODES,
+  type DesktopApi,
+  type ReminderPreview,
+} from "@/desktop-api/contract";
 import { cn } from "@/lib/utils";
 
 const MAX_VISIBLE = 3;
@@ -24,6 +29,7 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
   const [collapsed, setCollapsed] = useState(demo === "collapsed");
   const [dismissed, setDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +39,18 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
         if (!cancelled) setPreview(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(desktopErrorMessage(err));
+        if (cancelled) return;
+        const message = desktopErrorMessage(err);
+        const isUnavailable =
+          typeof err === "object" &&
+          err !== null &&
+          (err as { code?: string }).code === ERROR_CODES.INTERNAL_ERROR &&
+          message.includes("尚未实现");
+        if (isUnavailable) {
+          setUnavailable(true);
+        } else {
+          setError(message);
+        }
       });
     return () => {
       cancelled = true;
@@ -44,10 +61,26 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
     return null;
   }
 
+  if (unavailable) {
+    return (
+      <div
+        className="flex h-screen items-center justify-center bg-surface-canvas p-4 text-text-primary"
+        data-window="reminder"
+        data-state="degraded"
+      >
+        <div className="flex max-w-sm flex-col items-center gap-2 rounded-lg border border-border-subtle bg-surface-primary px-8 py-8 text-center shadow-floating">
+          <BellOff className="h-6 w-6 text-text-muted" aria-hidden />
+          <p className="text-body font-medium">不提供预览</p>
+          <p className="text-secondary-size text-text-muted">自动提醒将在系统功能启用后生效</p>
+        </div>
+      </div>
+    );
+  }
+
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background p-4 text-foreground">
-        <p className="text-sm text-destructive" role="alert">
+      <div className="flex h-screen items-center justify-center bg-surface-canvas p-4 text-text-primary">
+        <p className="text-secondary-size text-danger" role="alert">
           提醒加载失败：{error}
         </p>
       </div>

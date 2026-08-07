@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
 import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
-import { desktopErrorMessage, type Agent, type DesktopApi } from "@/desktop-api/contract";
+import { cn } from "@/lib/utils";
+import { desktopErrorMessage } from "@/desktop-api/contract";
+import type { Agent, DesktopApi } from "@/desktop-api/contract";
 
 export interface QuickNoteWindowProps {
   api: DesktopApi;
@@ -20,7 +21,8 @@ interface DraftBinding {
 }
 
 /**
- * 快捷新建窗口：每次进入都是空白提示，只负责新建，不展示历史。
+ * 快捷新建窗口：floating command utility。
+ * 每次进入都是空白提示；content 非空且至少绑定一个 Agent 才允许保存。
  * 键盘：Ctrl+Enter 保存，Esc 关闭。
  */
 export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) {
@@ -32,6 +34,7 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTitle, setShowTitle] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const savingRef = useRef(false);
 
@@ -55,11 +58,16 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
     setBindings([]);
     setShowTitle(false);
     setError(null);
+    setSubmitAttempted(false);
   }, []);
+
+  const canSave = content.trim().length > 0 && bindings.length > 0;
+  const noAgentHint = !submitAttempted && content.trim().length > 0 && bindings.length === 0;
 
   const submit = useCallback(async () => {
     const trimmed = content.trim();
-    if (!trimmed || savingRef.current) {
+    if (!trimmed || bindings.length === 0 || savingRef.current) {
+      setSubmitAttempted(true);
       return;
     }
     savingRef.current = true;
@@ -101,38 +109,39 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
+      className="flex h-screen flex-col overflow-hidden bg-surface-canvas text-text-primary"
       data-window="quick-note"
     >
-      <div className="flex shrink-0 items-center justify-between px-4 py-2.5">
-        <h1 className="text-heading font-semibold tracking-tight">新建提示</h1>
+      <div className="flex shrink-0 items-center justify-between px-4 py-2">
+        <h1 className="text-page-title font-semibold tracking-tight">新建提示</h1>
         <button
           type="button"
           aria-label="关闭（Esc）"
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-aux text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-secondary-size text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus-visible:bg-surface-hover"
           onClick={() => onClose?.()}
         >
-          <kbd className="rounded-sm border bg-card px-1.5 py-0.5 font-sans text-[11px] shadow-sm">
+          <kbd className="rounded-sm border border-border-default bg-surface-primary px-1.5 py-0.5 font-sans text-caption shadow-sm">
             Esc
           </kbd>
           关闭
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-2">
+      <div className="flex min-h-0 flex-1 flex-col px-4 py-1">
         {showTitle ? (
           <Input
             aria-label="标题"
             placeholder="标题（可选）"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
+            className="mb-2 border-transparent bg-transparent px-1 text-page-title font-medium placeholder:text-text-disabled focus-visible:border-accent-ring focus-visible:bg-surface-primary"
           />
         ) : (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="w-fit px-2 text-muted-foreground underline decoration-dotted underline-offset-4 hover:bg-transparent hover:text-foreground"
+            className="mb-1 w-fit px-1 text-secondary-size text-text-muted underline decoration-dotted underline-offset-4 hover:bg-transparent hover:text-text-primary"
             onClick={() => setShowTitle(true)}
           >
             添加标题
@@ -145,26 +154,13 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
           placeholder="写下要提醒自己的内容……"
           value={content}
           onChange={(event) => setContent(event.target.value)}
-          rows={7}
-          className="min-h-0 flex-1 resize-none rounded-md"
+          rows={6}
+          className="min-h-0 flex-1 resize-none rounded-lg border-border-subtle bg-surface-primary px-3 py-2 text-body leading-relaxed focus-visible:border-accent-ring focus-visible:shadow-[0_0_0_3px_var(--accent-ring)]"
         />
 
-        <div className="flex flex-col gap-1.5 pb-2">
-          <Label className="text-aux text-muted-foreground">绑定 Agent</Label>
-          <AgentMultiSelect
-            agents={agents}
-            selectedIds={bindings.map((b) => b.agentId)}
-            onChange={(ids) =>
-              setBindings((current) => {
-                const existing = new Map(current.map((b) => [b.agentId, b]));
-                return ids.map((id) => existing.get(id) ?? { agentId: id, autoAttach: true });
-              })
-            }
-            disabled={saving}
-            showSelected={false}
-          />
+        <div className="shrink-0 py-2">
           {bindings.length > 0 && (
-            <div className="flex max-h-36 flex-col gap-1 overflow-y-auto pr-0.5">
+            <div className="mb-1.5 flex max-h-28 flex-col gap-0.5 overflow-y-auto">
               {bindings.map((binding) => {
                 const agent = agents.find((a) => a.id === binding.agentId);
                 if (!agent) return null;
@@ -189,30 +185,52 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
               })}
             </div>
           )}
+          <AgentMultiSelect
+            agents={agents}
+            selectedIds={bindings.map((b) => b.agentId)}
+            onChange={(ids) => {
+              setBindings((current) => {
+                const existing = new Map(current.map((b) => [b.agentId, b]));
+                return ids.map((id) => existing.get(id) ?? { agentId: id, autoAttach: true });
+              });
+              // 选择后焦点回到正文，避免快捷键被菜单 trigger 捕获
+              textareaRef.current?.focus();
+            }}
+            disabled={saving}
+            showSelected={false}
+            onMenuClosed={() => textareaRef.current?.focus()}
+          />
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           {saved && (
-            <span className="flex shrink-0 items-center gap-1 text-aux text-success" role="status">
+            <span
+              className="flex shrink-0 items-center gap-1 text-secondary-size text-success"
+              role="status"
+            >
               <CheckCircle2 className="h-3.5 w-3.5" />
               已保存
             </span>
           )}
-          {error && (
-            <span className="truncate text-aux text-destructive" role="alert">
+          {error ? (
+            <span className="truncate text-secondary-size text-danger" role="alert">
               {error}
             </span>
-          )}
+          ) : noAgentHint ? (
+            <span className="truncate text-secondary-size text-text-muted">
+              请至少绑定一个 Agent
+            </span>
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-aux text-muted-foreground">
-            <kbd className="rounded-sm border bg-card px-1 py-0.5 font-sans text-[11px] shadow-sm">
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-secondary-size text-text-muted">
+            <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
               Ctrl
             </kbd>
             <span className="mx-0.5">+</span>
-            <kbd className="rounded-sm border bg-card px-1 py-0.5 font-sans text-[11px] shadow-sm">
+            <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
               Enter
             </kbd>
             保存
@@ -220,7 +238,8 @@ export default function QuickNoteWindow({ api, onClose }: QuickNoteWindowProps) 
           <Button
             type="button"
             size="sm"
-            disabled={saving || !content.trim()}
+            className={cn(!canSave && "opacity-50")}
+            disabled={saving || !canSave}
             onClick={() => void submit()}
           >
             {saving ? "保存中…" : "保存"}

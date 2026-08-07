@@ -12,6 +12,11 @@ async function renderQuickNote(api: MockDesktopApi) {
   return { user, onClose, unmount: view.unmount };
 }
 
+async function selectAgent(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole("button", { name: /添加 Agent/ }));
+  await user.click(await screen.findByRole("menuitem", { name: new RegExp(name) }));
+}
+
 describe("快捷新建窗口", () => {
   it("初次进入内容为空", async () => {
     const api = new MockDesktopApi();
@@ -41,10 +46,8 @@ describe("快捷新建窗口", () => {
     const createSpy = vi.spyOn(api, "createTip");
     const { user } = await renderQuickNote(api);
     await user.type(screen.getByLabelText("正文"), "一条新便签");
-    await user.click(screen.getByRole("button", { name: /添加 Agent/ }));
-    await user.click(await screen.findByRole("menuitem", { name: /Cursor/ }));
-    await user.click(screen.getByRole("button", { name: /添加 Agent/ }));
-    await user.click(screen.getByRole("menuitem", { name: /Claude Code/ }));
+    await selectAgent(user, "Cursor");
+    await selectAgent(user, "Claude Code");
     await user.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
     const input = createSpy.mock.calls[0][0];
@@ -57,8 +60,7 @@ describe("快捷新建窗口", () => {
   it("Agent 每个只显示一次", async () => {
     const api = new MockDesktopApi();
     const { user } = await renderQuickNote(api);
-    await user.click(screen.getByRole("button", { name: /添加 Agent/ }));
-    await user.click(await screen.findByRole("menuitem", { name: /Cursor/ }));
+    await selectAgent(user, "Cursor");
     expect(screen.getAllByText("Cursor", { exact: true })).toHaveLength(1);
   });
 
@@ -67,6 +69,7 @@ describe("快捷新建窗口", () => {
     const createSpy = vi.spyOn(api, "createTip");
     const { user } = await renderQuickNote(api);
     await user.type(screen.getByLabelText("正文"), "快捷键保存");
+    await selectAgent(user, "Cursor");
     await user.keyboard("{Control>}{Enter}{/Control}");
     await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
   });
@@ -77,6 +80,7 @@ describe("快捷新建窗口", () => {
     const createSpy = vi.spyOn(api, "createTip");
     const { user } = await renderQuickNote(api);
     await user.type(screen.getByLabelText("正文"), "防重复");
+    await selectAgent(user, "Cursor");
     await user.keyboard("{Control>}{Enter}{Enter}{/Control}");
     await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
   });
@@ -86,6 +90,7 @@ describe("快捷新建窗口", () => {
     api.setMockFailure("save", true);
     const { user } = await renderQuickNote(api);
     await user.type(screen.getByLabelText("正文"), "不应丢失的内容");
+    await selectAgent(user, "Cursor");
     await user.click(screen.getByRole("button", { name: "保存" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/模拟保存失败/);
     expect(screen.getByLabelText("正文")).toHaveValue("不应丢失的内容");
@@ -95,10 +100,34 @@ describe("快捷新建窗口", () => {
     const api = new MockDesktopApi();
     const { user, unmount } = await renderQuickNote(api);
     await user.type(screen.getByLabelText("正文"), "旧内容");
+    await selectAgent(user, "Cursor");
     await user.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("已保存"));
     unmount();
     await renderQuickNote(api);
     expect(screen.getByLabelText("正文")).toHaveValue("");
+  });
+
+  it("0 Agent 时保存 disabled 并提示绑定", async () => {
+    const api = new MockDesktopApi();
+    const createSpy = vi.spyOn(api, "createTip");
+    const { user } = await renderQuickNote(api);
+    await user.type(screen.getByLabelText("正文"), "只有正文");
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    expect(screen.getByText("请至少绑定一个 Agent")).toBeInTheDocument();
+    await user.click(save);
+    await waitFor(() => expect(createSpy).not.toHaveBeenCalled());
+  });
+
+  it("有正文 + Agent 时保存 enabled", async () => {
+    const api = new MockDesktopApi();
+    const { user } = await renderQuickNote(api);
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    await user.type(screen.getByLabelText("正文"), "正文内容");
+    expect(save).toBeDisabled();
+    await selectAgent(user, "Cursor");
+    expect(save).toBeEnabled();
   });
 });

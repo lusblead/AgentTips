@@ -54,7 +54,8 @@ describe("主管理窗口", () => {
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     expect(await screen.findByText("修改前先解释调用链")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "删除提示" }));
+    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "删除提示" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除" }));
     expect(screen.queryByText("修改前解释调用链")).not.toBeInTheDocument();
     expect(screen.getByText("完成后运行全部测试")).toBeInTheDocument();
@@ -74,6 +75,7 @@ describe("主管理窗口", () => {
     expect(await screen.findByText("还没有提示")).toBeInTheDocument();
     expect(screen.getByText(/Ctrl \+ F12/)).toBeInTheDocument();
     expect(screen.queryByText("从列表选择一条提示")).not.toBeInTheDocument();
+    expect(screen.getAllByText("还没有提示")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "新建提示" }).length).toBeGreaterThanOrEqual(1);
   });
 
@@ -91,9 +93,49 @@ describe("主管理窗口", () => {
     const { user } = await renderLibrary(api);
     await user.click(screen.getByText("修改前解释调用链"));
     await screen.findByLabelText("标题");
-    await user.click(screen.getByRole("button", { name: "删除提示" }));
+    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "删除提示" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/模拟删除失败/);
     expect(screen.getByText("修改前解释调用链")).toBeInTheDocument();
+  });
+
+  it("clean state 显示已保存且不显示保存按钮", async () => {
+    const api = new MockDesktopApi();
+    const { user } = await renderLibrary(api);
+    await user.click(screen.getByText("修改前解释调用链"));
+    await screen.findByLabelText("标题");
+    expect(screen.getByText("已保存")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存修改" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "还原" })).not.toBeInTheDocument();
+  });
+
+  it("dirty state 才显示保存修改与还原", async () => {
+    const api = new MockDesktopApi();
+    const { user } = await renderLibrary(api);
+    await user.click(screen.getByText("修改前解释调用链"));
+    await screen.findByLabelText("标题");
+    await user.type(screen.getByLabelText("标题"), " 已修改");
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "还原" })).toBeInTheDocument();
+    expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
+  });
+
+  it("Delete 不作为长期红色 toolbar 按钮", async () => {
+    const api = new MockDesktopApi();
+    const { user } = await renderLibrary(api);
+    await user.click(screen.getByText("修改前解释调用链"));
+    await screen.findByLabelText("标题");
+    expect(screen.queryByRole("button", { name: "删除提示" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    expect(await screen.findByRole("menuitem", { name: "删除提示" })).toBeInTheDocument();
+  });
+
+  it("Agent 图标不使用字体 glyph", async () => {
+    const api = new MockDesktopApi();
+    render(<NoteLibraryWindow api={api} />);
+    await screen.findByText("修改前解释调用链");
+    expect(document.body.textContent).not.toContain("⌘");
+    expect(document.body.textContent).not.toContain("▣");
   });
 });

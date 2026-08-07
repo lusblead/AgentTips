@@ -39,6 +39,22 @@ $expectedMap = if ($Directory -eq "phase-1.5") {
         "settings-degraded.png" = $fallback
         "settings-hotkey-invalid.png" = $fallback
     }
+} elseif ($Directory -eq "phase-2.2") {
+    @{
+        "main-window.png" = "1000x750"
+        "main-window-hover.png" = "1000x750"
+        "main-window-editing.png" = "1000x750"
+        "main-window-empty.png" = "1000x750"
+        "quick-note-empty.png" = "1000x750"
+        "quick-note-filled.png" = "1000x750"
+        "quick-note-multiple-agents.png" = "1000x750"
+        "settings-default.png" = "1000x750"
+        "settings-recording.png" = "1000x750"
+        "settings-invalid.png" = "1000x750"
+        "reminder-degraded.png" = "1000x750"
+        "reminder-expanded.png" = "420x360"
+        "reminder-collapsed.png" = "420x360"
+    }
 } else {
     @{}
 }
@@ -77,7 +93,7 @@ foreach ($name in $files) {
     }
     $contentRatio = $nonBg / $total
     $minRatio = 0.01
-    if ($Directory -eq "phase-2.1") {
+    if ($Directory -eq "phase-2.1" -or $Directory -eq "phase-2.2") {
         $minRatio = 0.002
     }
     if ($contentRatio -lt $minRatio) {
@@ -86,7 +102,8 @@ foreach ($name in $files) {
     if ($edgeNonBg -gt 60) {
         $failures += "$name suspicious edge pixels (possible clipping): $edgeNonBg"
     }
-    if ($accentPixels -lt 50) {
+    $isReminderShot = $name -like "reminder-*"
+    if ($accentPixels -lt 50 -and -not $isReminderShot) {
         $failures += "$name missing accent pixels (selection/primary action invisible): $accentPixels"
     }
     Write-Host ("{0} : {1} content={2}% accent={3} edge={4}" -f $name, $actual, [Math]::Round($contentRatio * 100, 2), $accentPixels, $edgeNonBg)

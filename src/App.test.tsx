@@ -50,7 +50,17 @@ describe("窗口路由", () => {
 });
 
 describe("UI 开发文字清理", () => {
-  const forbidden = ["Phase 1", "Phase 6", "仅前端", "尚未注册", "New Tip", "3 Tips"];
+  const forbidden = [
+    "Phase 1",
+    "Phase 6",
+    "仅前端",
+    "尚未注册",
+    "New Tip",
+    "3 Tips",
+    "尚未实现",
+    "后续阶段接入",
+    "开发阶段",
+  ];
 
   it.each(["/?window=main", "/?window=quick-note", "/?window=reminder", "/?window=settings"])(
     "%s 不含开发阶段文字",

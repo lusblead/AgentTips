@@ -599,8 +599,17 @@ async function run() {
     }
     console.log("update via UI ok ✓ (正文已改、绑定替换为仅 Cursor、autoAttach=false)");
 
-    // ---- UI 删除 ----
-    await clickByLabel(client, "删除提示");
+    // ---- UI 删除（overflow menu）----
+    await realClick(client, '[aria-label="更多操作"]');
+    await client.waitForExpression(
+      `[...document.querySelectorAll('[role="menuitem"]')].some((el) => (el.textContent ?? '').includes('删除'))`,
+      "删除菜单项",
+    );
+    await client.evaluate(`(() => {
+      const items = [...document.querySelectorAll('[role="menuitem"]')];
+      const target = items.find((el) => (el.textContent ?? '').includes('删除'));
+      target?.click();
+    })()`);
     await client.waitForExpression(`Boolean(document.querySelector('[role="dialog"]'))`, "确认对话框");
     await clickDialogButton(client, "删除");
     await client.waitForExpression(
@@ -653,22 +662,21 @@ async function run() {
     await clickButton(client, "重新录制");
     await client.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }))`);
     await client.waitForExpression(
-      `document.querySelector('[role="alert"]')?.textContent.includes("尚未实现")`,
-      "previewHotkey 降级提示",
+      `document.body.textContent.includes("该能力将在系统功能启用后生效")`,
+      "快捷键中性占位提示",
     );
     const hotkeyAfter = await client.evaluate(`document.querySelector('[data-testid="hotkey-display"]').textContent`);
     if (hotkeyBefore !== "Ctrl + F12" || hotkeyAfter !== "Ctrl + F12") {
       throw new Error(`快捷键降级异常 before=${hotkeyBefore} after=${hotkeyAfter}`);
     }
-    console.log("settings degraded ok ✓ (尚未实现提示、快捷键保持 F12)");
+    console.log("settings degraded ok ✓ (中性占位提示、快捷键保持 F12)");
 
     await client.switchRoute("reminder");
-    await client.waitForExpression(`document.querySelector('[role="alert"]') !== null`, "提醒窗口");
     await client.waitForExpression(
-      `document.querySelector('[role="alert"]')?.textContent.includes("尚未实现")`,
-      "reminder 降级提示",
+      `document.body.textContent.includes("不提供预览")`,
+      "提醒中性占位提示",
     );
-    console.log("reminder degraded ok ✓ (尚未实现提示、不白屏)");
+    console.log("reminder degraded ok ✓ (中性占位提示、不白屏)");
     assertNoConsoleErrors(client, "degraded-pages");
 
     // ---- 主管理与快捷不受影响 ----

@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import {
+  Archive,
+  Copy,
+  Monitor,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Settings,
+  Terminal,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
 import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
@@ -12,7 +26,7 @@ import { ConfirmActionDialog } from "@/components/shared/ConfirmActionDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { TipCard } from "@/components/shared/TipCard";
-import { desktopErrorMessage } from "@/desktop-api/contract";
+import { cn } from "@/lib/utils";
 import type {
   Agent,
   AgentBinding,
@@ -20,6 +34,7 @@ import type {
   TipDetail,
   TipSummary,
 } from "@/desktop-api/contract";
+import { desktopErrorMessage } from "@/desktop-api/contract";
 
 export interface NoteLibraryWindowProps {
   api: DesktopApi;
@@ -30,8 +45,8 @@ export interface NoteLibraryWindowProps {
 }
 
 /**
- * 主管理窗口（三栏）：Agent 导航 / 便签列表 + 搜索 / 详情编辑。
- * 唯一允许浏览历史便签的地方。
+ * 主管理窗口（三栏）：Agent 导航 / 提示列表 + 搜索 / Inspector 编辑。
+ * 唯一允许浏览历史提示的地方。
  */
 export default function NoteLibraryWindow({
   api,
@@ -54,9 +69,20 @@ export default function NoteLibraryWindow({
   const [editorTitle, setEditorTitle] = useState("");
   const [editorContent, setEditorContent] = useState("");
   const [editorBindings, setEditorBindings] = useState<AgentBinding[]>([]);
+  const [savedSnapshot, setSavedSnapshot] = useState<{
+    title: string;
+    content: string;
+    bindings: AgentBinding[];
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const isDirty =
+    savedSnapshot !== null &&
+    (editorTitle !== savedSnapshot.title ||
+      editorContent !== savedSnapshot.content ||
+      JSON.stringify(editorBindings) !== JSON.stringify(savedSnapshot.bindings));
 
   const loadTips = useCallback(
     async (agentId: string | undefined, term: string) => {
@@ -89,11 +115,16 @@ export default function NoteLibraryWindow({
         const tip = await api.getTip(id);
         setDetail(tip);
         if (tip) {
-          setEditorTitle(tip.title);
-          setEditorContent(tip.content);
-          setEditorBindings(
-            tip.bindings.map((b) => ({ agentId: b.agentId, autoAttach: b.autoAttach })),
-          );
+          const title = tip.title;
+          const content = tip.content;
+          const bindings = tip.bindings.map((b) => ({
+            agentId: b.agentId,
+            autoAttach: b.autoAttach,
+          }));
+          setEditorTitle(title);
+          setEditorContent(content);
+          setEditorBindings(bindings);
+          setSavedSnapshot({ title, content, bindings: JSON.parse(JSON.stringify(bindings)) });
         }
       } catch (err) {
         setDetailError(desktopErrorMessage(err));
@@ -102,13 +133,13 @@ export default function NoteLibraryWindow({
     [api],
   );
 
-  /** 列表有数据时保证右侧有选中项，不让详情区无意义留空。 */
   const ensureSelection = useCallback(
     async (list: TipSummary[]) => {
       if (list.length === 0) {
         selectedTipIdRef.current = null;
         setSelectedTipId(null);
         setDetail(null);
+        setSavedSnapshot(null);
         return;
       }
       const currentValid =
@@ -160,7 +191,7 @@ export default function NoteLibraryWindow({
     if (!selectedTipId || saving) return;
     const trimmed = editorContent.trim();
     if (!trimmed) {
-      setDetailError("便签正文不能为空");
+      setDetailError("提示正文不能为空");
       return;
     }
     setSaving(true);
@@ -171,8 +202,11 @@ export default function NoteLibraryWindow({
         content: trimmed,
         bindings: editorBindings,
       });
-      setNotice("已保存");
-      window.setTimeout(() => setNotice(null), 900);
+      setSavedSnapshot({
+        title: editorTitle.trim(),
+        content: trimmed,
+        bindings: JSON.parse(JSON.stringify(editorBindings)),
+      });
       const list = await loadTips(selectedAgentId, search);
       await ensureSelection(list);
     } catch (err) {
@@ -194,6 +228,17 @@ export default function NoteLibraryWindow({
     }
   };
 
+  const copyContent = async () => {
+    if (!detail) return;
+    try {
+      await navigator.clipboard.writeText(detail.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* clipboard 不可用时静默 */
+    }
+  };
+
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const agentCounts = new Map<string, number>();
   for (const tip of tips) {
@@ -201,18 +246,17 @@ export default function NoteLibraryWindow({
       agentCounts.set(agentId, (agentCounts.get(agentId) ?? 0) + 1);
     }
   }
-  const hasData = tips.length > 0;
-  const emptyState = !hasData && !search;
+  const emptyWorkspace = !loading && !loadError && tips.length === 0 && !search;
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
+      className="flex h-screen flex-col overflow-hidden bg-surface-canvas text-text-primary"
       data-window="main"
       data-testid="main-layout"
     >
-      <header className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-        <h2 className="text-heading font-semibold tracking-tight">提示库</h2>
-        <div className="flex items-center gap-2">
+      <header className="flex shrink-0 items-center justify-between border-b border-border-subtle px-4 py-2">
+        <h2 className="text-page-title font-semibold tracking-tight">提示库</h2>
+        <div className="flex items-center gap-1">
           <Button variant="ghost" size="sm" aria-label="打开设置" onClick={onOpenSettings}>
             <Settings className="h-4 w-4" />
             设置
@@ -225,7 +269,7 @@ export default function NoteLibraryWindow({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-52 shrink-0 flex-col gap-1 p-3">
+        <aside className="flex w-52 shrink-0 flex-col gap-0.5 bg-surface-secondary p-2.5">
           <Button
             variant={selectedAgentId === undefined ? "secondary" : "ghost"}
             size="sm"
@@ -233,24 +277,28 @@ export default function NoteLibraryWindow({
             aria-label="筛选全部便签"
             onClick={() => setSelectedAgentId(undefined)}
           >
-            <span className="flex-1 truncate text-left">全部便签</span>
-            <span className="text-[11px] text-muted-foreground">{tips.length}</span>
+            <span className="flex-1 truncate text-left">全部提示</span>
+            <span className="text-caption text-text-muted">{tips.length}</span>
           </Button>
-          <Separator className="my-2" />
-          <p className="px-2 pb-1 text-aux font-medium text-muted-foreground">Agent</p>
+          <p className="px-2 pb-0.5 pt-2 text-caption font-medium text-text-muted">Agent</p>
           <div className="flex flex-col gap-0.5">
             {agents.map((agent) => (
               <Button
                 key={agent.id}
                 variant={selectedAgentId === agent.id ? "secondary" : "ghost"}
                 size="sm"
-                className="justify-start"
+                className="justify-start gap-2"
                 aria-label={`筛选 ${agent.name}`}
                 title={agent.kind === "terminal" ? "终端 Agent" : "桌面 Agent"}
                 onClick={() => setSelectedAgentId(agent.id)}
               >
+                {agent.kind === "terminal" ? (
+                  <Terminal className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+                ) : (
+                  <Monitor className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+                )}
                 <span className="flex-1 truncate text-left">{agent.name}</span>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-caption text-text-muted">
                   {agentCounts.get(agent.id) ?? 0}
                 </span>
               </Button>
@@ -258,14 +306,14 @@ export default function NoteLibraryWindow({
           </div>
         </aside>
 
-        <section className="flex w-80 shrink-0 flex-col border-x">
-          <div className="p-3">
+        <section className="flex w-80 shrink-0 flex-col border-x border-border-subtle bg-surface-primary">
+          <div className="p-3 pb-2">
             <SearchInput value={search} onChange={setSearch} />
           </div>
-          <div className="px-3 pb-1 text-aux text-muted-foreground">
+          <div className="px-4 pb-1 text-secondary-size text-text-muted">
             {selectedAgent ? `${selectedAgent.name} 的提示` : "全部提示"} · {tips.length} 条
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
             {loadError ? (
               <EmptyState
                 title="加载失败"
@@ -282,11 +330,12 @@ export default function NoteLibraryWindow({
                 }
               />
             ) : loading && tips.length === 0 ? (
-              <p className="py-10 text-center text-aux text-muted-foreground">加载中…</p>
-            ) : emptyState ? (
+              <p className="py-10 text-center text-secondary-size text-text-muted">加载中…</p>
+            ) : emptyWorkspace ? (
               <EmptyState
+                className="py-16"
                 title="还没有提示"
-                description="按 Ctrl + F12 随时记录一条提示，或在下方新建"
+                description="按 Ctrl + F12 随时记录一条提示，或立即新建第一条"
                 action={
                   <Button size="sm" onClick={onNewTip}>
                     <Plus className="h-4 w-4" />
@@ -297,7 +346,7 @@ export default function NoteLibraryWindow({
             ) : tips.length === 0 ? (
               <EmptyState title="没有匹配的提示" description="换个关键词或 Agent 试试" />
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="divide-y divide-border-subtle/60">
                 {tips.map((tip) => (
                   <TipCard
                     key={tip.id}
@@ -312,49 +361,57 @@ export default function NoteLibraryWindow({
           </div>
         </section>
 
-        <section className="min-w-0 flex-1 overflow-hidden">
+        <section className="min-w-0 flex-1 overflow-hidden bg-surface-primary">
           {detail ? (
             <div className="flex h-full flex-col">
-              <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
-                <h3 className="text-sm font-medium">编辑提示</h3>
-                <div className="flex items-center gap-2">
-                  {notice && <span className="text-aux text-success">{notice}</span>}
-                  {detail.status === "archived" && <Badge variant="secondary">已归档</Badge>}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    aria-label="删除提示"
-                    onClick={() => setDeleteConfirm(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    删除
-                  </Button>
-                </div>
+              <div className="flex shrink-0 items-center justify-between px-4 py-1.5">
+                <span className="text-caption text-text-muted">编辑提示</span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="更多操作">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem disabled>
+                      <Archive className="h-4 w-4" />
+                      归档
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void copyContent()}>
+                      <Copy className="h-4 w-4" />
+                      {copied ? "已复制" : "复制"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-danger focus:text-danger"
+                      aria-label="删除提示"
+                      onSelect={() => setDeleteConfirm(true)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      删除
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                <div className="flex h-full flex-col gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="detail-title">标题</Label>
-                    <Input
-                      id="detail-title"
-                      value={editorTitle}
-                      onChange={(event) => setEditorTitle(event.target.value)}
-                      placeholder="标题（可选）"
-                    />
-                  </div>
-                  <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-                    <Label htmlFor="detail-content">正文</Label>
-                    <Textarea
-                      id="detail-content"
-                      value={editorContent}
-                      onChange={(event) => setEditorContent(event.target.value)}
-                      rows={8}
-                      className="min-h-0 flex-1 resize-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label className="mb-1 text-muted-foreground">绑定 Agent</Label>
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-2">
+                <Input
+                  id="detail-title"
+                  aria-label="标题"
+                  value={editorTitle}
+                  onChange={(event) => setEditorTitle(event.target.value)}
+                  placeholder="无标题"
+                  className="h-auto rounded-md border-transparent bg-transparent px-2 py-1 text-page-title font-semibold placeholder:text-text-disabled focus-visible:border-accent-ring focus-visible:bg-surface-primary"
+                />
+                <Textarea
+                  id="detail-content"
+                  value={editorContent}
+                  onChange={(event) => setEditorContent(event.target.value)}
+                  rows={8}
+                  className="mt-2 min-h-0 flex-1 resize-none border-transparent bg-transparent px-2 text-body leading-relaxed focus-visible:border-accent-ring focus-visible:bg-surface-primary"
+                />
+                <div className="mt-4 flex flex-col gap-1.5">
+                  <p className="px-2 text-secondary-size font-medium text-text-muted">绑定 Agent</p>
+                  <div className="px-2">
                     <AgentMultiSelect
                       agents={agents}
                       selectedIds={editorBindings.map((b) => b.agentId)}
@@ -369,68 +426,79 @@ export default function NoteLibraryWindow({
                       disabled={saving}
                       showSelected={false}
                     />
-                    {editorBindings.length > 0 && (
-                      <div className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-0.5">
-                        {editorBindings.map((binding) => {
-                          const agent = agents.find((a) => a.id === binding.agentId);
-                          if (!agent) return null;
-                          return (
-                            <AgentBindingRow
-                              key={binding.agentId}
-                              agentName={agent.name}
-                              checked={binding.autoAttach}
-                              disabled={saving}
-                              onCheckedChange={(autoAttach) =>
-                                setEditorBindings((current) =>
-                                  current.map((b) =>
-                                    b.agentId === binding.agentId ? { ...b, autoAttach } : b,
-                                  ),
-                                )
-                              }
-                              onRemove={() =>
-                                setEditorBindings((current) =>
-                                  current.filter((b) => b.agentId !== binding.agentId),
-                                )
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
+                  {editorBindings.length > 0 && (
+                    <div className="flex max-h-36 flex-col gap-0.5 overflow-y-auto">
+                      {editorBindings.map((binding) => {
+                        const agent = agents.find((a) => a.id === binding.agentId);
+                        if (!agent) return null;
+                        return (
+                          <AgentBindingRow
+                            key={binding.agentId}
+                            agentName={agent.name}
+                            checked={binding.autoAttach}
+                            disabled={saving}
+                            onCheckedChange={(autoAttach) =>
+                              setEditorBindings((current) =>
+                                current.map((b) =>
+                                  b.agentId === binding.agentId ? { ...b, autoAttach } : b,
+                                ),
+                              )
+                            }
+                            onRemove={() =>
+                              setEditorBindings((current) =>
+                                current.filter((b) => b.agentId !== binding.agentId),
+                              )
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t px-4 py-2.5">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle px-6 py-2">
                 {detailError ? (
-                  <span className="text-aux text-destructive" role="alert">
+                  <span className="text-secondary-size text-danger" role="alert">
                     {detailError}
                   </span>
+                ) : isDirty ? (
+                  <span className="text-secondary-size text-text-muted">有未保存的修改</span>
                 ) : (
-                  <span />
+                  <span className="text-secondary-size text-text-muted">已保存</span>
                 )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={saving}
-                    onClick={() => void openTip(selectedTipId!)}
-                  >
-                    还原
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={saving || !editorContent.trim()}
-                    onClick={() => void saveDetail()}
-                  >
-                    {saving ? "保存中…" : "保存修改"}
-                  </Button>
+                <div className="flex items-center gap-2">
+                  {isDirty && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => void openTip(selectedTipId!)}
+                      >
+                        还原
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={saving || !editorContent.trim()}
+                        onClick={() => void saveDetail()}
+                      >
+                        {saving ? "保存中…" : "保存修改"}
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-aux text-muted-foreground">
-                {emptyState ? "从左侧新建第一条提示" : "从列表选择一条提示"}
+            <div
+              className={cn(
+                "flex h-full items-center justify-center",
+                emptyWorkspace ? "bg-surface-primary" : "bg-surface-canvas",
+              )}
+            >
+              <p className="text-secondary-size text-text-muted">
+                {emptyWorkspace ? "" : "从列表选择一条提示"}
               </p>
             </div>
           )}

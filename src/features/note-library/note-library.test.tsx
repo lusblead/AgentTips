@@ -25,7 +25,7 @@ async function expandFirstTip(user: ReturnType<typeof userEvent.setup>) {
 function tipCardByTitle(title: string) {
   return screen
     .getAllByTestId("tip-card")
-    .find((card) => within(card).getByLabelText("标题").getAttribute("value") === title);
+    .find((card) => within(card).queryByLabelText("标题")?.getAttribute("value") === title);
 }
 
 describe("主管理窗口（Living Notes）", () => {
@@ -58,6 +58,36 @@ describe("主管理窗口（Living Notes）", () => {
     expect(within(first!).getByLabelText("正文")).toHaveValue(
       "修改任何核心模块前，先用一两句话说明调用链和影响范围。",
     );
+  });
+
+  it("titleless note uses body and tags, and the editor can reuse a historical tag", async () => {
+    const api = new MockDesktopApi();
+    const created = await api.createTip({
+      content: "没有标题的正文",
+      tags: ["个人"],
+      bindings: [],
+    });
+    const { user } = await renderLibrary(api);
+    const card = screen
+      .getAllByTestId("tip-card")
+      .find(
+        (item) =>
+          (within(item).getByLabelText("正文") as HTMLTextAreaElement).value === "没有标题的正文",
+      );
+    expect(card).toBeDefined();
+    expect(within(card!).queryByLabelText("标题")).not.toBeInTheDocument();
+    expect(within(card!).getByText("#个人")).toBeInTheDocument();
+
+    await user.click(within(card!).getByRole("button", { name: "展开详情" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText("标题")).not.toBeInTheDocument();
+    const tagInput = within(dialog).getByRole("combobox", { name: "添加标签" });
+    await user.click(tagInput);
+    await user.click(await screen.findByRole("option", { name: "测试" }));
+    await user.click(within(dialog).getByRole("button", { name: "保存修改" }));
+    await waitFor(async () => {
+      expect((await api.getTip(created.id))?.tags).toEqual(["个人", "测试"]);
+    });
   });
 
   it("首页不存在永久 Agent Sidebar", async () => {

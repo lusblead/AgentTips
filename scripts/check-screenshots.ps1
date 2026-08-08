@@ -15,9 +15,10 @@ if (-not (Test-Path $dir)) {
 
 $expectedMap = if ($Directory -eq "phase-1.5") {
     @{
-        "quick-note-empty.png" = "620x420"
-        "quick-note-filled.png" = "620x420"
-        "quick-note-multiple-agents.png" = "620x420"
+        "quick-note-empty.png" = "440x380"
+        "quick-note-filled.png" = "440x380"
+        "quick-note-multiple-agents.png" = "440x380"
+        "quick-note-discard-confirm.png" = "440x380"
         "main-window.png" = "1180x760"
         "main-window-empty.png" = "1180x760"
         "main-window-selected.png" = "1180x760"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Archive, Copy, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +14,9 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
 import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
 import { ConfirmActionDialog } from "@/components/shared/ConfirmActionDialog";
+import { TagInput } from "@/components/shared/TagInput";
 import { noteStyle } from "@/lib/palette";
+import { mergeTipTags } from "@/lib/tags";
 import { desktopErrorMessage } from "@/desktop-api/contract";
 import type { Agent, AgentBinding, DesktopApi, TipDetail } from "@/desktop-api/contract";
 
@@ -69,16 +71,22 @@ function EditorInner({ tip, agents, api, onClose, onTipUpdated, onTipDeleted }: 
     agentId: b.agentId,
     autoAttach: b.autoAttach,
   }));
+  const hasLegacyTitle = tip.title.trim().length > 0;
   const [title, setTitle] = useState(tip.title);
   const [content, setContent] = useState(tip.content);
+  const [tags, setTags] = useState<string[]>(tip.tags);
+  const [tagInput, setTagInput] = useState("");
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [bindings, setBindings] = useState<AgentBinding[]>(initialBindings);
   const [savedSnapshot, setSavedSnapshot] = useState<{
     title: string;
     content: string;
+    tags: string[];
     bindings: AgentBinding[];
   }>({
     title: tip.title,
     content: tip.content,
+    tags: [...tip.tags],
     bindings: JSON.parse(JSON.stringify(initialBindings)),
   });
   const [saving, setSaving] = useState(false);
@@ -90,7 +98,24 @@ function EditorInner({ tip, agents, api, onClose, onTipUpdated, onTipDeleted }: 
     savedSnapshot !== null &&
     (title !== savedSnapshot.title ||
       content !== savedSnapshot.content ||
+      tagInput.trim().length > 0 ||
+      JSON.stringify(tags) !== JSON.stringify(savedSnapshot.tags) ||
       JSON.stringify(bindings) !== JSON.stringify(savedSnapshot.bindings));
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listTags()
+      .then((list) => {
+        if (!cancelled) setTagSuggestions(list);
+      })
+      .catch(() => {
+        if (!cancelled) setTagSuggestions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   const save = async () => {
     if (saving) return;
@@ -99,21 +124,30 @@ function EditorInner({ tip, agents, api, onClose, onTipUpdated, onTipDeleted }: 
       setError("正文不能为空");
       return;
     }
+    const mergedTags = mergeTipTags(tags, tagInput, tagSuggestions);
+    if (mergedTags.error) {
+      setError(mergedTags.error);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const updated = await api.updateTip(tip.id, {
-        title: title.trim() || undefined,
+        ...(hasLegacyTitle ? { title: title.trim() } : {}),
         content: trimmed,
+        tags: mergedTags.tags,
         bindings,
       });
       setSavedSnapshot({
         title: updated.title,
         content: updated.content,
+        tags: [...updated.tags],
         bindings: updated.bindings.map((b) => ({ agentId: b.agentId, autoAttach: b.autoAttach })),
       });
       setTitle(updated.title);
       setContent(updated.content);
+      setTags(updated.tags);
+      setTagInput("");
       onTipUpdated(updated);
     } catch (err) {
       setError(desktopErrorMessage(err));
@@ -153,13 +187,14 @@ function EditorInner({ tip, agents, api, onClose, onTipUpdated, onTipDeleted }: 
           data-note-color={tip.colorKey}
         >
           <div className="flex shrink-0 items-start justify-between gap-2 px-6 pt-5 pr-3">
-            <Input
-              aria-label="标题"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="无标题"
-              className="h-auto rounded-md border-none bg-transparent px-2 py-1 text-[17px] font-semibold outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0"
-            />
+            {hasLegacyTitle && (
+              <Input
+                aria-label="标题"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                className="h-auto rounded-md border-none bg-transparent px-2 py-1 text-[17px] font-semibold outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+              />
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="更多操作">
@@ -199,6 +234,17 @@ function EditorInner({ tip, agents, api, onClose, onTipUpdated, onTipDeleted }: 
           </div>
 
           <div className="shrink-0 flex flex-col gap-1.5 border-t border-black/10 px-6 py-3">
+            <div className="px-2">
+              <TagInput
+                tags={tags}
+                suggestions={tagSuggestions}
+                inputValue={tagInput}
+                onInputValueChange={setTagInput}
+                onTagsChange={setTags}
+                onError={setError}
+                disabled={saving}
+              />
+            </div>
             <p className="px-2 text-secondary-size font-medium text-text-secondary">绑定 Agent</p>
             <div className="px-2">
               <AgentMultiSelect
@@ -264,6 +310,8 @@ function EditorInner({ tip, agents, api, onClose, onTipUpdated, onTipDeleted }: 
                     if (savedSnapshot) {
                       setTitle(savedSnapshot.title);
                       setContent(savedSnapshot.content);
+                      setTags([...savedSnapshot.tags]);
+                      setTagInput("");
                       setBindings(JSON.parse(JSON.stringify(savedSnapshot.bindings)));
                     }
                   }}

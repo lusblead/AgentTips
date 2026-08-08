@@ -17,6 +17,13 @@ test.describe("Phase 1.5 交互流程", () => {
     const textarea = page.getByLabel("正文");
     await expect(textarea).toHaveValue("");
     await textarea.fill("通过快捷键保存的便签");
+    const tagInput = page.getByRole("combobox", { name: "添加标签" });
+    await tagInput.click();
+    await page.getByRole("option", { name: "测试" }).click();
+    await tagInput.fill("快捷记录");
+    await tagInput.press("Enter");
+    await expect(page.getByRole("button", { name: "移除标签 测试" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "移除标签 快捷记录" })).toBeVisible();
     await page.getByRole("button", { name: /添加 Agent/ }).click();
     await page.getByRole("menuitem", { name: /Cursor/ }).click();
     await page.waitForFunction(
@@ -28,6 +35,38 @@ test.describe("Phase 1.5 交互流程", () => {
     await textarea.click();
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("status")).toHaveText("已保存");
+    await expect(textarea).toHaveValue("");
+    await expect(page.getByRole("button", { name: "移除标签 测试" })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("dirty quick note requires discard confirmation from keyboard and close button", async ({
+    page,
+  }) => {
+    const errors = trackConsole(page);
+    await page.setViewportSize({ width: 380, height: 320 });
+    await page.goto("/?window=quick-note");
+    const textarea = page.getByLabel("正文");
+    await textarea.fill("这段未保存内容不能被静默丢弃");
+
+    await page.keyboard.press("Escape");
+    const dialog = page.getByRole("dialog", { name: "放弃这条便签？" });
+    await expect(dialog).toBeVisible();
+    await expect(textarea).toHaveValue("这段未保存内容不能被静默丢弃");
+    await page.getByRole("button", { name: "继续编辑" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(textarea).toBeFocused();
+
+    await page.getByRole("button", { name: "关闭" }).click();
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(380);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(320);
+    await page.getByRole("button", { name: "放弃内容" }).click();
+    await expect(dialog).not.toBeVisible();
     await expect(textarea).toHaveValue("");
     expect(errors).toEqual([]);
   });

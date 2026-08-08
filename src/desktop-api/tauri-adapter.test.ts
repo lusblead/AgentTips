@@ -20,6 +20,7 @@ function createInput(): CreateTipInput {
   return {
     title: "新提示",
     content: "正文内容",
+    tags: ["Rust", "测试"],
     bindings: [
       { agentId: CURSOR_AGENT_ID, autoAttach: true },
       { agentId: CLAUDE_AGENT_ID, autoAttach: false },
@@ -32,6 +33,7 @@ describe("TauriDesktopApi", () => {
 
   beforeEach(() => {
     invokeMock.mockReset();
+    listenMock.mockReset();
   });
 
   it("listAgents 调用 agent_list", async () => {
@@ -61,6 +63,12 @@ describe("TauriDesktopApi", () => {
     expect(invokeMock).toHaveBeenCalledWith("tip_list", {
       query: { agentId: CURSOR_AGENT_ID, search: "测试" },
     });
+  });
+
+  it("listTags 调用 tag_list", async () => {
+    invokeMock.mockResolvedValue(["Rust", "测试"]);
+    await expect(api.listTags()).resolves.toEqual(["Rust", "测试"]);
+    expect(invokeMock).toHaveBeenCalledWith("tag_list");
   });
 
   it("Rust 结构化错误转换为 DesktopError", async () => {
@@ -192,6 +200,16 @@ describe("TauriDesktopApi", () => {
     listenMock.mockResolvedValue(() => undefined);
     const unsub = await api.subscribeQuickNoteReset(() => undefined);
     expect(listenMock).toHaveBeenCalledWith("agenttips://quick-note/reset", expect.any(Function));
+    expect(typeof unsub).toBe("function");
+  });
+
+  it("subscribeQuickNoteCloseRequested 监听系统标题栏关闭请求", async () => {
+    listenMock.mockResolvedValue(() => undefined);
+    const unsub = await api.subscribeQuickNoteCloseRequested(() => undefined);
+    expect(listenMock).toHaveBeenCalledWith(
+      "agenttips://quick-note/close-requested",
+      expect.any(Function),
+    );
     expect(typeof unsub).toBe("function");
   });
 });

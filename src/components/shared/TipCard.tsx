@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, Maximize2, RotateCcw } from "lucide-react";
 import { noteStyle, noteTextSecondaryStyle } from "@/lib/palette";
+import { cn } from "@/lib/utils";
 import type { Agent, TipSummary } from "@/desktop-api/contract";
 
 export interface TipCardProps {
@@ -24,11 +25,13 @@ function AutoGrowTextarea({
   onChange,
   ariaLabel,
   onBlur,
+  prominent,
 }: {
   value: string;
   onChange: (value: string) => void;
   ariaLabel: string;
   onBlur?: () => void;
+  prominent?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -47,7 +50,10 @@ function AutoGrowTextarea({
       onChange={(event) => onChange(event.target.value)}
       onBlur={onBlur}
       rows={1}
-      className="w-full resize-none overflow-y-hidden break-words rounded-md border-none bg-transparent px-1 py-0.5 text-[13px] leading-relaxed outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+      className={cn(
+        "w-full resize-none overflow-y-hidden break-words rounded-md border-none bg-transparent px-1 py-0.5 leading-relaxed outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none",
+        prominent ? "text-[14px]" : "text-[13px]",
+      )}
       style={noteTextSecondaryStyle()}
     />
   );
@@ -73,6 +79,7 @@ export function TipCard({
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
   const latestRef = useRef({ title: tip.title, content: tip.content });
+  const hasLegacyTitle = tip.title.trim().length > 0;
 
   const flush = useCallback(
     async (nextTitle: string, nextContent: string) => {
@@ -163,20 +170,32 @@ export function TipCard({
         )}
       </div>
 
-      <input
-        aria-label="标题"
-        value={title}
-        onChange={(event) => handleTitleChange(event.target.value)}
-        onBlur={() => flush(title, content)}
-        placeholder="无标题"
-        className="w-full break-words rounded-md border-none bg-transparent px-1 py-0.5 text-[15px] font-semibold outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
-      />
+      {hasLegacyTitle && (
+        <input
+          aria-label="标题"
+          value={title}
+          onChange={(event) => handleTitleChange(event.target.value)}
+          onBlur={() => flush(title, content)}
+          className="w-full break-words rounded-md border-none bg-transparent px-1 py-0.5 text-[15px] font-semibold outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+        />
+      )}
       <AutoGrowTextarea
         value={content}
         onChange={handleContentChange}
         ariaLabel="正文"
         onBlur={() => void flush(title, content)}
+        prominent={!hasLegacyTitle}
       />
+
+      {tip.tags.length > 0 && (
+        <div className="flex flex-wrap gap-x-2 gap-y-0.5 px-1 pt-1" aria-label="标签">
+          {tip.tags.map((tag) => (
+            <span key={tag.toLocaleLowerCase()} className="text-[11px] font-medium opacity-65">
+              #{tag}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="mt-auto flex items-center justify-between pt-1">
         <span className="line-clamp-1 text-[11px] opacity-70">{agentLabel}</span>

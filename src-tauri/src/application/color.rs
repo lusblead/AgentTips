@@ -73,6 +73,9 @@ mod tests {
         ) -> AppResult<Vec<crate::domain::tips::Tip>> {
             Ok(vec![])
         }
+        fn list_tags(&self, _limit: usize) -> AppResult<Vec<String>> {
+            Ok(vec![])
+        }
         fn delete(&self, _id: uuid::Uuid) -> AppResult<()> {
             Ok(())
         }
@@ -82,7 +85,7 @@ mod tests {
         fn update_text(
             &self,
             _id: uuid::Uuid,
-            _title: &str,
+            _title: Option<&str>,
             _content: &str,
             _updated_at: chrono::DateTime<chrono::Utc>,
         ) -> AppResult<crate::domain::tips::Tip> {

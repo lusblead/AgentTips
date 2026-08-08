@@ -44,6 +44,11 @@ pub fn tip_list(
 }
 
 #[tauri::command]
+pub fn tag_list(state: State<'_, AppState>) -> Result<Vec<String>, AppErrorDto> {
+    state.tips.list_tags().map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
 pub fn tip_update(
     state: State<'_, AppState>,
     input: UpdateTipInputDto,

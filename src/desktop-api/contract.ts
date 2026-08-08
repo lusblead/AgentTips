@@ -34,8 +34,10 @@ export interface TipBindingDto extends AgentBinding {
 
 export interface TipSummary {
   id: string;
+  /** 空字符串表示该便签没有标题；Quick Note 默认保持为空。 */
   title: string;
   content: string;
+  tags: string[];
   status: TipStatus;
   updatedAt: string;
   colorKey: NoteColorKey;
@@ -47,6 +49,7 @@ export interface TipDetail {
   id: string;
   title: string;
   content: string;
+  tags: string[];
   status: TipStatus;
   updatedAt: string;
   colorKey: NoteColorKey;
@@ -57,6 +60,7 @@ export interface TipDetail {
 export interface CreateTipInput {
   title?: string;
   content: string;
+  tags?: string[];
   colorKey?: NoteColorKey;
   status?: "draft" | "active";
   bindings: AgentBinding[];
@@ -65,6 +69,7 @@ export interface CreateTipInput {
 export interface UpdateTipInput {
   title?: string;
   content?: string;
+  tags?: string[];
   bindings?: AgentBinding[];
 }
 
@@ -156,6 +161,11 @@ export interface QuickNoteResetPayload {
   openedAt: string;
 }
 
+/** 系统标题栏请求关闭 Quick Note；前端统一执行未保存草稿保护。 */
+export interface QuickNoteCloseRequestedPayload {
+  requestedAt: string;
+}
+
 /** 统一结构化错误（与 Rust AppErrorDto 对应）。 */
 export interface DesktopError {
   code: string;
@@ -198,6 +208,8 @@ export type MockFailureKind = "save" | "delete" | "hotkey";
 
 export interface DesktopApi {
   listTips(query?: TipQuery): Promise<TipSummary[]>;
+  /** 最近使用优先的历史标签建议；用户仍可输入任意新标签。 */
+  listTags(): Promise<string[]>;
   getTip(id: string): Promise<TipDetail | null>;
   createTip(input: CreateTipInput): Promise<TipDetail>;
   updateTip(id: string, input: UpdateTipInput): Promise<TipDetail>;
@@ -241,6 +253,10 @@ export interface DesktopApi {
 
   /** 订阅快捷窗口 reset（新 Draft Session）。Tauri 下由 Window Manager show 时触发。 */
   subscribeQuickNoteReset(handler: (payload: QuickNoteResetPayload) => void): Promise<() => void>;
+  /** 订阅系统标题栏关闭请求；Quick Note 必须先检查未保存草稿。 */
+  subscribeQuickNoteCloseRequested(
+    handler: (payload: QuickNoteCloseRequestedPayload) => void,
+  ): Promise<() => void>;
 
   setMockFailure(kind: MockFailureKind, enabled: boolean): void;
   reset(): void;

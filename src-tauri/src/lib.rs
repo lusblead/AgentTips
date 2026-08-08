@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 use crate::domain::detection::DesktopAgentRule;
 use crate::domain::terminal::TerminalAgentRule;
@@ -42,8 +42,8 @@ use commands::reminder::{
     reminder_dismiss, reminder_get_current_payload, reminder_settings_get, reminder_settings_update,
 };
 use commands::tips::{
-    note_color_suggest, tip_create, tip_delete, tip_get, tip_list, tip_mark_used, tip_restore_used,
-    tip_update, tip_update_color, tip_update_text,
+    note_color_suggest, tag_list, tip_create, tip_delete, tip_get, tip_list, tip_mark_used,
+    tip_restore_used, tip_update, tip_update_color, tip_update_text,
 };
 use commands::windows::{
     window_get_kind, window_hide_current, window_open_main, window_open_quick_note,
@@ -74,7 +74,26 @@ fn database_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>
     Ok(data_dir.join("agenttips.sqlite3"))
 }
 
-/// 统一窗口关闭语义：main/settings → hide；quick-note → hide（draft 由前端清）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuickNoteCloseAction {
+    AllowClose,
+    HideWindow(WindowLabel),
+    RequestDraftConfirmation,
+    PreventClose,
+}
+
+fn quick_note_close_action(is_quitting: bool, label: Option<WindowLabel>) -> QuickNoteCloseAction {
+    if is_quitting {
+        return QuickNoteCloseAction::AllowClose;
+    }
+    match label {
+        Some(WindowLabel::QuickNote) => QuickNoteCloseAction::RequestDraftConfirmation,
+        Some(label) => QuickNoteCloseAction::HideWindow(label),
+        None => QuickNoteCloseAction::PreventClose,
+    }
+}
+
+/// 统一窗口关闭语义：main/settings/reminder → hide；quick-note → 请求前端确认未保存草稿。
 /// 只有 is_quitting=true（Tray 退出 / quit command）才允许真正关闭。
 fn on_window_event<R: tauri::Runtime>(
     state: &AppState,
@@ -82,14 +101,28 @@ fn on_window_event<R: tauri::Runtime>(
     event: &WindowEvent,
 ) {
     if let WindowEvent::CloseRequested { api, .. } = event {
-        if state.is_quitting.load(Ordering::Relaxed) {
-            return;
-        }
-        api.prevent_close();
-        let label = window.label();
-        let window_label = WindowLabel::from_label(label).ok();
-        if let Some(window_label) = window_label {
-            let _ = state.windows.hide(window_label);
+        let action = quick_note_close_action(
+            state.is_quitting.load(Ordering::Relaxed),
+            WindowLabel::from_label(window.label()).ok(),
+        );
+        match action {
+            QuickNoteCloseAction::AllowClose => {}
+            QuickNoteCloseAction::HideWindow(label) => {
+                api.prevent_close();
+                let _ = state.windows.hide(label);
+            }
+            QuickNoteCloseAction::RequestDraftConfirmation => {
+                api.prevent_close();
+                let _ = window.emit(
+                    "agenttips://quick-note/close-requested",
+                    serde_json::json!({
+                        "requestedAt": chrono::Utc::now().to_rfc3339(),
+                    }),
+                );
+            }
+            QuickNoteCloseAction::PreventClose => {
+                api.prevent_close();
+            }
         }
     }
 }
@@ -290,6 +323,7 @@ pub fn run() {
             tip_create,
             tip_get,
             tip_list,
+            tag_list,
             tip_update,
             tip_delete,
             note_color_suggest,
@@ -317,4 +351,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod window_event_policy_tests {
+    use super::*;
+
+    #[test]
+    fn quick_note_native_close_requests_confirmation() {
+        assert_eq!(
+            quick_note_close_action(false, Some(WindowLabel::QuickNote)),
+            QuickNoteCloseAction::RequestDraftConfirmation
+        );
+        assert_eq!(
+            quick_note_close_action(false, Some(WindowLabel::Main)),
+            QuickNoteCloseAction::HideWindow(WindowLabel::Main)
+        );
+        assert_eq!(
+            quick_note_close_action(true, Some(WindowLabel::QuickNote)),
+            QuickNoteCloseAction::AllowClose
+        );
+    }
 }

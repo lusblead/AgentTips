@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::domain::agents::{Agent, AgentKind};
 use crate::domain::color::NoteColorKey;
-use crate::domain::tips::{Tip, TipBinding, TipQuery, TipStatus};
+use crate::domain::tips::{normalized_tag_key, Tip, TipBinding, TipQuery, TipStatus};
 use crate::error::{AppError, AppResult};
 use crate::ports::agents::AgentRepository;
 use crate::ports::tips::TipRepository;
@@ -22,6 +22,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         4,
         include_str!("../../migrations/0004_reminder_runtime.sql"),
     ),
+    (5, include_str!("../../migrations/0005_tip_tags.sql")),
 ];
 
 /// 内置 Agent 初始名单（docs/03-domain-data-model.md）。
@@ -207,6 +208,7 @@ fn tip_from_row(row: &Row) -> rusqlite::Result<Tip> {
         id: Uuid::from_str(&id).map_err(|e| rusqlite::Error::InvalidColumnName(e.to_string()))?,
         title,
         content,
+        tags: Vec::new(),
         status: TipStatus::parse(&status)
             .map_err(|e| rusqlite::Error::InvalidColumnName(e.to_string()))?,
         created_at: parse_rfc(&created_at)
@@ -282,6 +284,35 @@ fn load_bindings(conn: &Connection, tip_ids: &[Uuid]) -> AppResult<Vec<(Uuid, Ti
     Ok(by_tip)
 }
 
+fn load_tags(conn: &Connection, tip_ids: &[Uuid]) -> AppResult<Vec<(Uuid, String)>> {
+    if tip_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; tip_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT tt.tip_id, t.name
+         FROM tip_tags tt
+         JOIN tags t ON t.id = tt.tag_id
+         WHERE tt.tip_id IN ({placeholders})
+         ORDER BY tt.tip_id, tt.sort_order"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(AppError::from)?;
+    let params: Vec<String> = tip_ids.iter().map(|id| id.to_string()).collect();
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let tip_id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            Ok((
+                Uuid::from_str(&tip_id)
+                    .map_err(|e| rusqlite::Error::InvalidColumnName(e.to_string()))?,
+                name,
+            ))
+        })
+        .map_err(AppError::from)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(AppError::from)
+}
+
 fn load_tip(conn: &Connection, id: Uuid) -> AppResult<Option<Tip>> {
     let mut stmt = conn
         .prepare(
@@ -299,6 +330,10 @@ fn load_tip(conn: &Connection, id: Uuid) -> AppResult<Option<Tip>> {
     tip.bindings = load_bindings(conn, &[id])?
         .into_iter()
         .map(|(_, b)| b)
+        .collect();
+    tip.tags = load_tags(conn, &[id])?
+        .into_iter()
+        .map(|(_, tag)| tag)
         .collect();
     Ok(Some(tip))
 }
@@ -338,6 +373,40 @@ fn insert_bindings(conn: &Connection, tip_id: Uuid, bindings: &[TipBinding]) -> 
     Ok(())
 }
 
+fn insert_tags(
+    conn: &Connection,
+    tip_id: Uuid,
+    tags: &[String],
+    updated_at: DateTime<Utc>,
+) -> AppResult<()> {
+    let at = rfc(updated_at);
+    for (sort_order, name) in tags.iter().enumerate() {
+        let normalized_name = normalized_tag_key(name);
+        let candidate_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO tags (id, name, normalized_name, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(normalized_name) DO UPDATE SET updated_at = excluded.updated_at",
+            params![candidate_id, name, normalized_name, at],
+        )
+        .map_err(AppError::from)?;
+        let tag_id: String = conn
+            .query_row(
+                "SELECT id FROM tags WHERE normalized_name = ?1",
+                params![normalized_name],
+                |row| row.get(0),
+            )
+            .map_err(AppError::from)?;
+        conn.execute(
+            "INSERT INTO tip_tags (tip_id, tag_id, sort_order, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![tip_id.to_string(), tag_id, sort_order as i64, at],
+        )
+        .map_err(AppError::from)?;
+    }
+    Ok(())
+}
+
 impl TipRepository for SqliteDatabase {
     fn create_with_bindings(&self, tip: &Tip, bindings: &[TipBinding]) -> AppResult<Tip> {
         let conn = self.conn.lock().unwrap();
@@ -360,6 +429,7 @@ impl TipRepository for SqliteDatabase {
         )
         .map_err(AppError::from)?;
         insert_bindings(&tx, tip.id, bindings)?;
+        insert_tags(&tx, tip.id, &tip.tags, tip.updated_at)?;
         tx.commit().map_err(AppError::from)?;
         load_tip(&conn, tip.id)?.ok_or_else(|| AppError::Internal("创建后读取失败".into()))
     }
@@ -393,7 +463,13 @@ impl TipRepository for SqliteDatabase {
             params![tip.id.to_string()],
         )
         .map_err(AppError::from)?;
+        tx.execute(
+            "DELETE FROM tip_tags WHERE tip_id = ?1",
+            params![tip.id.to_string()],
+        )
+        .map_err(AppError::from)?;
         insert_bindings(&tx, tip.id, bindings)?;
+        insert_tags(&tx, tip.id, &tip.tags, tip.updated_at)?;
         tx.commit().map_err(AppError::from)?;
         load_tip(&conn, tip.id)?.ok_or_else(|| AppError::Internal("更新后读取失败".into()))
     }
@@ -412,7 +488,15 @@ impl TipRepository for SqliteDatabase {
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(search) = &query.search {
             let needle = format!("%{}%", search.trim().to_lowercase());
-            sql.push_str(" AND (LOWER(COALESCE(title, '')) LIKE ? OR LOWER(content) LIKE ?)");
+            sql.push_str(
+                " AND (LOWER(COALESCE(title, '')) LIKE ? OR LOWER(content) LIKE ?
+                  OR EXISTS (
+                    SELECT 1 FROM tip_tags tt
+                    JOIN tags tag ON tag.id = tt.tag_id
+                    WHERE tt.tip_id = tips.id AND LOWER(tag.name) LIKE ?
+                  ))",
+            );
+            args.push(Box::new(needle.clone()));
             args.push(Box::new(needle.clone()));
             args.push(Box::new(needle));
         }
@@ -441,7 +525,7 @@ impl TipRepository for SqliteDatabase {
         }
         drop(stmt);
 
-        // 批量加载绑定并分组，避免 N+1
+        // 批量加载绑定与标签并分组，避免 N+1
         let ids: Vec<Uuid> = tips.iter().map(|tip| tip.id).collect();
         let bindings = load_bindings(&conn, &ids)?;
         let mut grouped: std::collections::HashMap<Uuid, Vec<TipBinding>> =
@@ -454,7 +538,34 @@ impl TipRepository for SqliteDatabase {
                 tip.bindings = bindings;
             }
         }
+        let tags = load_tags(&conn, &ids)?;
+        let mut grouped_tags: std::collections::HashMap<Uuid, Vec<String>> =
+            std::collections::HashMap::new();
+        for (tip_id, tag) in tags {
+            grouped_tags.entry(tip_id).or_default().push(tag);
+        }
+        for tip in tips.iter_mut() {
+            if let Some(tags) = grouped_tags.remove(&tip.id) {
+                tip.tags = tags;
+            }
+        }
         Ok(tips)
+    }
+
+    fn list_tags(&self, limit: usize) -> AppResult<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM tags
+                 ORDER BY updated_at DESC, name COLLATE NOCASE ASC
+                 LIMIT ?1",
+            )
+            .map_err(AppError::from)?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(AppError::from)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(AppError::from)
     }
 
     fn delete(&self, id: Uuid) -> AppResult<()> {
@@ -500,7 +611,7 @@ impl TipRepository for SqliteDatabase {
     fn update_text(
         &self,
         id: Uuid,
-        title: &str,
+        title: Option<&str>,
         content: &str,
         updated_at: DateTime<Utc>,
     ) -> AppResult<Tip> {
@@ -606,6 +717,7 @@ mod tests {
             id,
             title: title.map(str::to_string),
             content: content.to_string(),
+            tags: vec![],
             status: TipStatus::Active,
             created_at: t,
             updated_at: t,
@@ -658,11 +770,53 @@ mod tests {
     }
 
     #[test]
+    fn migration_5_preserves_existing_titleless_tips() {
+        let path = temp_db_path("tags-upgrade");
+        let tip_id = Uuid::new_v4();
+        {
+            let conn = Connection::open(&path).unwrap();
+            for (version, sql) in MIGRATIONS.iter().take(4) {
+                apply_migration(&conn, *version, sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO tips (id, title, content, status, created_at, updated_at, deleted_at, color_key, used_at)
+                 VALUES (?1, NULL, '升级前正文', 'active', ?2, ?2, NULL, 'lemon', NULL)",
+                params![tip_id.to_string(), rfc(now())],
+            )
+            .unwrap();
+        }
+
+        let db = SqliteDatabase::open(&path).unwrap();
+        let preserved = db.get(tip_id).unwrap().expect("existing Tip must survive");
+        assert_eq!(preserved.title, None);
+        assert_eq!(preserved.content, "升级前正文");
+        assert!(preserved.tags.is_empty());
+        let versions: i64 = db
+            .with_conn(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                    row.get(0)
+                })
+                .map_err(AppError::from)
+            })
+            .unwrap();
+        assert_eq!(versions, 5);
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn required_tables_indices_and_fk_exist() {
         let path = temp_db_path("schema");
         let db = SqliteDatabase::open(&path).unwrap();
         let conn = db.conn.lock().unwrap();
-        for table in ["agents", "tips", "tip_agents", "schema_migrations"] {
+        for table in [
+            "agents",
+            "tips",
+            "tip_agents",
+            "tags",
+            "tip_tags",
+            "schema_migrations",
+        ] {
             let count: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -672,7 +826,12 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "missing table {table}");
         }
-        for index in ["idx_tips_updated_at", "idx_tip_agents_agent"] {
+        for index in [
+            "idx_tips_updated_at",
+            "idx_tip_agents_agent",
+            "idx_tip_tags_tag",
+            "idx_tags_updated_at",
+        ] {
             let count: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
@@ -867,6 +1026,61 @@ mod tests {
     }
 
     #[test]
+    fn create_without_bindings_round_trips() {
+        let (db, _, _) = setup_repo();
+        let tip = sample_tip(Uuid::new_v4(), None, "先记录，稍后绑定", &[]);
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+        assert!(created.bindings.is_empty());
+
+        let read = db.get(created.id).unwrap().expect("tip should exist");
+        assert_eq!(read.content, "先记录，稍后绑定");
+        assert!(read.bindings.is_empty());
+    }
+
+    #[test]
+    fn create_with_tags_round_trips() {
+        let (db, agent_a, _) = setup_repo();
+        let mut tip = sample_tip(
+            Uuid::new_v4(),
+            None,
+            "无标题正文",
+            &[binding(agent_a, true, 0)],
+        );
+        tip.tags = vec!["Rust".into(), "代码审查".into()];
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+        assert_eq!(created.title, None);
+        assert_eq!(created.tags, vec!["Rust", "代码审查"]);
+
+        let read = db.get(created.id).unwrap().expect("tip should exist");
+        assert_eq!(read.tags, created.tags);
+        assert_eq!(TipRepository::list_tags(&db, 50).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn tag_constraint_failure_rolls_back_tip_and_bindings() {
+        let (db, agent_a, _) = setup_repo();
+        let mut tip = sample_tip(
+            Uuid::new_v4(),
+            None,
+            "事务失败不能残留",
+            &[binding(agent_a, true, 0)],
+        );
+        // 绕过领域校验直接验证 repository 的事务边界：两个值命中同一规范化标签。
+        tip.tags = vec!["Rust".into(), "rust".into()];
+        assert!(db.create_with_bindings(&tip, &tip.bindings).is_err());
+
+        let conn = db.conn.lock().unwrap();
+        for table in ["tips", "tip_agents", "tags", "tip_tags"] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} must roll back with the aggregate");
+        }
+    }
+
+    #[test]
     fn create_with_multi_agent_bindings_keeps_independent_auto_attach() {
         let (db, agent_a, agent_b) = setup_repo();
         let tip = sample_tip(
@@ -987,6 +1201,30 @@ mod tests {
         .unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title.as_deref(), Some("运行测试"));
+    }
+
+    #[test]
+    fn search_by_tag() {
+        let (db, agent_a, _) = setup_repo();
+        let mut tagged = sample_tip(
+            Uuid::new_v4(),
+            None,
+            "正文不包含检索词",
+            &[binding(agent_a, true, 0)],
+        );
+        tagged.tags = vec!["数据库迁移".into()];
+        db.create_with_bindings(&tagged, &tagged.bindings).unwrap();
+
+        let list = TipRepository::list(
+            &db,
+            &TipQuery {
+                search: Some("迁移".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].tags, vec!["数据库迁移"]);
     }
 
     #[test]
@@ -1142,12 +1380,24 @@ mod tests {
         );
         let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
         let updated =
-            TipRepository::update_text(&db, created.id, "新标题", "新正文", now()).unwrap();
+            TipRepository::update_text(&db, created.id, Some("新标题"), "新正文", now()).unwrap();
         assert_eq!(updated.title.as_deref(), Some("新标题"));
         assert_eq!(updated.content, "新正文");
         assert_eq!(updated.color_key, created.color_key);
         assert_eq!(updated.used_at, created.used_at);
         assert_eq!(updated.status, created.status);
+        assert_eq!(updated.bindings, created.bindings);
+    }
+
+    #[test]
+    fn titleless_text_update_stays_titleless_and_keeps_tags() {
+        let (db, agent_a, _) = setup_repo();
+        let mut tip = sample_tip(Uuid::new_v4(), None, "原正文", &[binding(agent_a, true, 0)]);
+        tip.tags = vec!["持续保留".into()];
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+        let updated = TipRepository::update_text(&db, created.id, None, "新正文", now()).unwrap();
+        assert_eq!(updated.title, None);
+        assert_eq!(updated.tags, vec!["持续保留"]);
         assert_eq!(updated.bindings, created.bindings);
     }
 

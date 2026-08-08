@@ -53,7 +53,7 @@ export default function App() {
     case "quick-note":
       return (
         <div data-desktop-adapter={adapterMarker}>
-          <QuickNoteWindow api={api} onClose={() => void api.hideCurrentWindow("quick-note")} />
+          <QuickNoteWindow api={api} />
         </div>
       );
     case "reminder":

@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_db_migrates_to_version_4() {
+    fn fresh_db_migrates_to_latest_version() {
         let db = Arc::new(SqliteDatabase::open_in_memory().unwrap());
         let version: i64 = db
             .with_conn(|conn| {
@@ -276,7 +276,7 @@ mod tests {
                     .unwrap())
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     #[test]

@@ -19,6 +19,7 @@
 interface CreateTipInput {
   title?: string;
   content: string;
+  tags?: string[];
   status: "draft" | "active";
   bindings: Array<{
     agentId: string;
@@ -32,13 +33,19 @@ interface CreateTipInput {
 校验：
 
 - active 正文不能为空；
+- 缺少标题时保持为空，不从正文生成；
+- tags 为用户输入；后端负责规范化、大小写不敏感去重及数量/长度校验；
 - Agent 必须存在且未删除；
 - bindings 中 agentId 不重复；
-- 创建 Tip 与 bindings 必须同事务。
+- 创建 Tip、首次出现的 tags、TipTag 关联与 bindings 必须同事务。
 
 ### `tip_update`
 
-输入包含 `id`、可编辑字段和完整绑定集合。MVP 采用“全量替换绑定”语义，避免前端计算增删差异。
+输入包含 `id`、可编辑字段、完整标签集合和完整绑定集合。MVP 对标签与绑定采用“全量替换”语义，避免前端计算增删差异。
+
+### `tag_list`
+
+返回最近使用优先的历史标签名数组。该命令只返回标签，不返回历史便签正文；读取失败不应阻止前端自由输入新标签。
 
 ### `tip_list`
 

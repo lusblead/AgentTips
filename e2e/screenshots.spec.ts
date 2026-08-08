@@ -7,7 +7,7 @@ const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(E2E_DIR, "..", "artifacts", "screenshots", "phase-1.5");
 const VIEWPORTS = {
   main: { width: 1180, height: 760 },
-  quickNote: { width: 620, height: 420 },
+  quickNote: { width: 440, height: 380 },
   reminder: { width: 420, height: 360 },
   settings: { width: 800, height: 600 },
 };
@@ -45,6 +45,11 @@ test.describe("Phase 1.5 视觉截图", () => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.quickNote, "/?window=quick-note");
     await page.getByLabel("正文").fill("修改任何核心模块前，先解释调用链与影响范围。");
+    const tagInput = page.getByRole("combobox", { name: "添加标签" });
+    await tagInput.click();
+    await page.getByRole("option", { name: "代码审查" }).click();
+    await tagInput.fill("重要");
+    await tagInput.press("Enter");
     await page.screenshot({ path: join(OUT_DIR, "quick-note-filled.png") });
     expect(errors).toEqual([]);
   });
@@ -53,6 +58,8 @@ test.describe("Phase 1.5 视觉截图", () => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.quickNote, "/?window=quick-note");
     await page.getByLabel("正文").fill("同时提醒多个 Agent 的通用约束。");
+    await page.getByRole("combobox", { name: "添加标签" }).fill("跨 Agent");
+    await page.getByRole("combobox", { name: "添加标签" }).press("Enter");
     await page.getByRole("button", { name: /添加 Agent/ }).click();
     await page.getByRole("menuitem", { name: /Cursor/ }).click();
     await page.getByRole("button", { name: /添加 Agent/ }).click();
@@ -60,6 +67,16 @@ test.describe("Phase 1.5 视觉截图", () => {
     await expect(page.getByLabel("Cursor 默认携带")).toBeVisible();
     await expect(page.getByLabel("Claude Code 默认携带")).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "quick-note-multiple-agents.png") });
+    expect(errors).toEqual([]);
+  });
+
+  test("快捷窗口：放弃未保存内容确认", async ({ page }) => {
+    const errors = trackErrors(page);
+    await setup(page, VIEWPORTS.quickNote, "/?window=quick-note");
+    await page.getByLabel("正文").fill("尚未保存的重要内容");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "放弃这条便签？" })).toBeVisible();
+    await page.screenshot({ path: join(OUT_DIR, "quick-note-discard-confirm.png") });
     expect(errors).toEqual([]);
   });
 

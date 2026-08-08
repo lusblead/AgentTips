@@ -14,6 +14,7 @@ import {
   type HotkeyRuntimeState,
   type MockFailureKind,
   type NoteColorKey,
+  type QuickNoteCloseRequestedPayload,
   type QuickNoteResetPayload,
   type ReminderPayloadDto,
   type ReminderSettings,
@@ -76,6 +77,14 @@ export class TauriDesktopApi implements DesktopApi {
   async listTips(query?: TipQuery): Promise<TipSummary[]> {
     try {
       return await invoke<TipSummary[]>("tip_list", { query: query ?? {} });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async listTags(): Promise<string[]> {
+    try {
+      return await invoke<string[]>("tag_list");
     } catch (error) {
       throw toDesktopError(error);
     }
@@ -205,6 +214,16 @@ export class TauriDesktopApi implements DesktopApi {
     const { listen } = await import("@tauri-apps/api/event");
     return listen<QuickNoteResetPayload>("agenttips://quick-note/reset", (event) =>
       handler(event.payload),
+    );
+  }
+
+  async subscribeQuickNoteCloseRequested(
+    handler: (payload: QuickNoteCloseRequestedPayload) => void,
+  ): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<QuickNoteCloseRequestedPayload>(
+      "agenttips://quick-note/close-requested",
+      (event) => handler(event.payload),
     );
   }
 

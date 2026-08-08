@@ -44,7 +44,7 @@
 
 - Rust 领域实体与校验，包括 HotkeyBinding/HotkeyPolicy；
 - migrations；
-- Tip、Agent、Binding repository；
+- Tip、用户标签、TipTag、Agent、Binding repository；
 - CRUD Commands 与 settings_get_hotkey/settings_update_hotkey 契约（Phase 2 使用 Fake registrar 或只完成用例层）；
 - 前端 Tauri adapter；
 - SQLite 集成测试。

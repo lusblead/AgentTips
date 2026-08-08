@@ -67,7 +67,7 @@ Domain → 不依赖任何外部框架
 
 | 模块          | 核心职责                      | 公开入口                          | 禁止承担                |
 | ------------- | ----------------------------- | --------------------------------- | ----------------------- |
-| `tips`        | Tip 生命周期、校验、查询      | Tip use cases / repository port   | 窗口、快捷键、检测      |
+| `tips`        | Tip、自由标签的生命周期与查询 | Tip use cases / repository port   | 窗口、快捷键、检测      |
 | `agents`      | Agent 与规则配置              | Agent use cases / repository port | 直接读取 Win32          |
 | `bindings`    | Tip-Agent 多对多和 autoAttach | Binding service                   | 冷却状态                |
 | `hotkey`      | 快捷键值对象、策略、注册切换  | UpdateHotkey use case             | React 键盘 UI           |
@@ -108,6 +108,7 @@ export interface DesktopApi {
   createTip(input: CreateTipInput): Promise<TipDto>;
   updateTip(input: UpdateTipInput): Promise<TipDto>;
   listTips(query: TipQuery): Promise<TipPageDto>;
+  listTags(): Promise<string[]>;
   listAgents(): Promise<AgentDto[]>;
   getHotkey(): Promise<HotkeyBindingDto>;
   updateHotkey(input: HotkeyCandidateDto): Promise<HotkeyUpdateResultDto>;

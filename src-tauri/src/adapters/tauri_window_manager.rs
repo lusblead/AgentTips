@@ -45,13 +45,13 @@ impl TauriWindowManager {
             .inner_size(
                 match label {
                     WindowLabel::Main => 1100.0,
-                    WindowLabel::QuickNote => 740.0,
+                    WindowLabel::QuickNote => 440.0,
                     WindowLabel::Settings => 860.0,
                     WindowLabel::Reminder => 440.0,
                 },
                 match label {
                     WindowLabel::Main => 760.0,
-                    WindowLabel::QuickNote => 520.0,
+                    WindowLabel::QuickNote => 380.0,
                     WindowLabel::Settings => 620.0,
                     WindowLabel::Reminder => 540.0,
                 },
@@ -59,13 +59,13 @@ impl TauriWindowManager {
             .min_inner_size(
                 match label {
                     WindowLabel::Main => 900.0,
-                    WindowLabel::QuickNote => 640.0,
+                    WindowLabel::QuickNote => 380.0,
                     WindowLabel::Settings => 720.0,
                     WindowLabel::Reminder => 380.0,
                 },
                 match label {
                     WindowLabel::Main => 620.0,
-                    WindowLabel::QuickNote => 420.0,
+                    WindowLabel::QuickNote => 320.0,
                     WindowLabel::Settings => 520.0,
                     WindowLabel::Reminder => 380.0,
                 },
@@ -76,10 +76,12 @@ impl TauriWindowManager {
         builder = builder.max_inner_size(
             match label {
                 WindowLabel::Reminder => 460.0,
+                WindowLabel::QuickNote => 620.0,
                 _ => 820.0,
             },
             match label {
                 WindowLabel::Reminder => 560.0,
+                WindowLabel::QuickNote => 520.0,
                 _ => 680.0,
             },
         );

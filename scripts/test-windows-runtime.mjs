@@ -54,10 +54,11 @@ if not os.path.exists(db):
     raise SystemExit
 conn = sqlite3.connect(db)
 cur = conn.cursor()
-rows = cur.execute("SELECT id FROM tips WHERE title LIKE ?", ('${prefix}%',)).fetchall()
+rows = cur.execute("SELECT id FROM tips WHERE content LIKE ?", ('${prefix}%',)).fetchall()
 ids = [r[0] for r in rows]
 if ids:
     cur.execute("DELETE FROM tip_agents WHERE tip_id IN ({})".format(",".join("?"*len(ids))), ids)
+    cur.execute("DELETE FROM tip_tags WHERE tip_id IN ({})".format(",".join("?"*len(ids))), ids)
     cur.execute("DELETE FROM tips WHERE id IN ({})".format(",".join("?"*len(ids))), ids)
 conn.commit()
 print(len(ids))
@@ -66,20 +67,23 @@ conn.close()
   console.log(`db cleanup (${prefix}): removed ${Number(runPython(code))}`);
 }
 
-function dbCountTitle(title) {
+function dbReadTipByContent(content) {
   const code = `
-import sqlite3, os
+import json, sqlite3, os
 db = os.path.join(os.environ['AGENTTIPS_TEST_DATA_DIR'], 'agenttips.sqlite3')
 if not os.path.exists(db):
-    print(0)
+    print(json.dumps({"count": 0, "title": None, "tags": []}))
     raise SystemExit
 conn = sqlite3.connect(db)
 cur = conn.cursor()
-n = cur.execute("SELECT COUNT(*) FROM tips WHERE title = ? AND deleted_at IS NULL", ('${title}',)).fetchone()[0]
-print(n)
+rows = cur.execute("SELECT id, title FROM tips WHERE content = ? AND deleted_at IS NULL", (${JSON.stringify(content)},)).fetchall()
+tags = []
+if len(rows) == 1:
+    tags = [r[0] for r in cur.execute("SELECT t.name FROM tip_tags tt JOIN tags t ON t.id = tt.tag_id WHERE tt.tip_id = ? ORDER BY tt.sort_order", (rows[0][0],)).fetchall()]
+print(json.dumps({"count": len(rows), "title": rows[0][1] if len(rows) == 1 else None, "tags": tags}, ensure_ascii=False))
 conn.close()
 `;
-  return Number(runPython(code));
+  return JSON.parse(runPython(code));
 }
 
 async function listTargets() {
@@ -383,6 +387,16 @@ async function setTextarea(client, ariaLabel, text) {
   })()`);
 }
 
+async function setTextInput(client, ariaLabel, text) {
+  await client.evaluateRetry(`(() => {
+    const el = document.querySelector('input[aria-label=${JSON.stringify(ariaLabel)}]');
+    if (!el) throw new Error('input not found: ' + ${JSON.stringify(ariaLabel)});
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(el, ${JSON.stringify(text)});
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+}
+
 async function clickButton(client, text) {
   const ok = await client.evaluateRetry(`(() => {
     const buttons = [...document.querySelectorAll('button')];
@@ -396,100 +410,6 @@ async function clickButton(client, text) {
   if (!ok) throw new Error(`button not found: ${text}`);
 }
 
-async function realClick(client, selector) {
-  const box = await client.evaluate(`(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  })()`);
-  if (!box) throw new Error(`click target missing: ${selector}`);
-  await client.send("Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    x: box.x,
-    y: box.y,
-    button: "left",
-    clickCount: 1,
-  });
-  await client.send("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x: box.x,
-    y: box.y,
-    button: "left",
-    clickCount: 1,
-  });
-  await sleep(200);
-}
-
-async function pickAgent(client, agentName) {
-  // 竞态根因：Quick Note reset 后 React 尚未完成渲染，测试过早点击。
-  // 正确流程：等待 reset 完成（按钮可见且 enabled）→ 重新获取最新 DOM →
-  // 点击一次 → 等待菜单项；失败则关闭菜单、重新定位，最多重试 2 次。
-  for (let attempt = 0; attempt <= 2; attempt += 1) {
-    await waitFor(
-      async () =>
-        Boolean(
-          await client.tryEval(`(() => {
-            const btn = [...document.querySelectorAll('button')].find(
-              (b) => (b.textContent ?? '').includes('添加 Agent') && !b.disabled,
-            );
-            return !!btn;
-          })()`),
-        ),
-      { timeout: 5_000, label: "添加 Agent 按钮就绪" },
-    );
-    const found = await client.evaluate(`(() => {
-      const buttons = [...document.querySelectorAll('button')];
-      const target = buttons.find(
-        (b) => (b.textContent ?? '').includes('添加 Agent') && !b.disabled,
-      );
-      if (!target) return false;
-      target.dataset.pickAgent = '1';
-      return true;
-    })()`);
-    if (!found) throw new Error("add agent button not found");
-    await realClick(client, 'button[data-pick-agent="1"]');
-    await sleep(250);
-    const clicked = await client.evaluate(`(() => {
-      const items = [...document.querySelectorAll('[role="menuitem"]')];
-      const target = items.find((el) => (el.textContent ?? '').includes(${JSON.stringify(agentName)}));
-      if (!target) return false;
-      target.click();
-      return true;
-    })()`);
-    if (clicked) return;
-    await client.evaluate(`document.body.click()`);
-    await sleep(400);
-    if (attempt === 2) {
-      throw new Error(`menu item not found: ${agentName}`);
-    }
-  }
-}
-
-async function switchValue(client, label) {
-  return client.evaluate(
-    `document.querySelector('[aria-label=${JSON.stringify(label)}]')?.getAttribute('aria-checked') ?? null`,
-  );
-}
-
-async function setSwitch(client, label, checked) {
-  // 目标式切换：先读当前值，已等于目标则直接返回；否则只点击一次并等待，
-  // 最多一轮重试。绝不连续盲点，避免 toggle 反转。
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const before = await switchValue(client, label);
-    if (String(before) === String(checked)) return;
-    await client.evaluate(`(() => {
-      const el = document.querySelector('[aria-label=${JSON.stringify(label)}]');
-      if (el) el.click();
-    })()`);
-    await sleep(200);
-  }
-  const after = await switchValue(client, label);
-  if (String(after) !== String(checked)) {
-    throw new Error(`switch ${label} not set to ${checked}`);
-  }
-}
-
 function assertNoConsoleErrors(client, phase) {
   const realErrors = client.errors.filter(
     (entry) => !entry.includes("favicon") && !entry.includes("DevTools"),
@@ -501,7 +421,7 @@ function assertNoConsoleErrors(client, phase) {
 
 async function run() {
   const prefix = "runtime-lifecycle-";
-  const uniqueTitle = `${prefix}${Date.now()}`;
+  const uniqueContent = `${prefix}${Date.now()}`;
   try {
     dbCleanupPrefix(prefix);
     startApp();
@@ -529,12 +449,48 @@ async function run() {
     console.log("2. quick-note first open via UI button  PASS");
 
     const quickSize = await cssViewport(quick).catch(() => cssViewport(quick));
-    assertApprox(quickSize.w, 740, 60, "quick-note width");
-    assertApprox(quickSize.h, 520, 60, "quick-note height");
+    assertApprox(quickSize.w, 440, 30, "quick-note width");
+    assertApprox(quickSize.h, 380, 30, "quick-note height");
     if (quickSize.w >= mainSize.w) {
       throw new Error(`quick-note must not be main-sized: ${quickSize.w} >= ${mainSize.w}`);
     }
-    console.log(`   quick-note size ${quickSize.w}x${quickSize.h} (独立小窗, 非 1100x760)  PASS`);
+    const quickLayout = await quick.evaluate(`(() => {
+      const root = document.documentElement;
+      const body = document.querySelector('textarea[aria-label="正文"]');
+      const tagInput = document.querySelector('input[aria-label="添加标签"]');
+      const bindings = document.querySelector('[data-testid="quick-note-bindings"]');
+      const actions = document.querySelector('[data-testid="quick-note-actions"]');
+      if (!body || !tagInput || !bindings || !actions) return null;
+      const bodyRect = body.getBoundingClientRect();
+      const bindingsRect = bindings.getBoundingClientRect();
+      const style = getComputedStyle(body);
+      return {
+        hasTitleControl: Boolean(document.querySelector('[aria-label="标题"]')) ||
+          [...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === '添加标题'),
+        horizontalOverflow: root.scrollWidth - root.clientWidth,
+        verticalOverflow: root.scrollHeight - root.clientHeight,
+        overlap: bodyRect.bottom > bindingsRect.top + 1,
+        borderWidth: style.borderWidth,
+        borderRadius: style.borderRadius,
+        boxShadow: style.boxShadow,
+        backgroundColor: style.backgroundColor,
+      };
+    })()`);
+    if (!quickLayout) throw new Error("quick-note layout elements missing");
+    if (quickLayout.hasTitleControl) throw new Error("quick-note must not render a title control");
+    if (quickLayout.horizontalOverflow > 0 || quickLayout.verticalOverflow > 0) {
+      throw new Error(`quick-note document overflow: ${JSON.stringify(quickLayout)}`);
+    }
+    if (quickLayout.overlap) throw new Error("quick-note body overlaps the bindings area");
+    if (
+      quickLayout.borderWidth !== "0px" ||
+      quickLayout.borderRadius !== "0px" ||
+      quickLayout.boxShadow !== "none" ||
+      quickLayout.backgroundColor !== "rgba(0, 0, 0, 0)"
+    ) {
+      throw new Error(`quick-note body must be frameless: ${JSON.stringify(quickLayout)}`);
+    }
+    console.log(`   quick-note size ${quickSize.w}x${quickSize.h}, compact frameless layout  PASS`);
 
     // 3. 再次打开 Quick Note：不重复创建
     await openWindow("quick-note");
@@ -543,12 +499,13 @@ async function run() {
     if (quickCount !== 1) throw new Error(`quick-note count should be 1, got ${quickCount}`);
     console.log("3. quick-note 不重复创建 (window label 唯一)  PASS");
 
-    // 8. 保存 -> hide；同时验证真实 CRUD 写入 SQLite
-    await setTextarea(quick, "正文", uniqueTitle);
-    await pickAgent(quick, "Cursor");
-    await pickAgent(quick, "Claude Code");
-    await setSwitch(quick, "Cursor 默认携带", true);
-    await setSwitch(quick, "Claude Code 默认携带", false);
+    // 8. 无 Agent 保存 -> hide；未按 Enter 的自由标签也保存，标题保持 NULL。
+    await setTextarea(quick, "正文", uniqueContent);
+    await setTextInput(quick, "添加标签", "runtime-tag");
+    const contentOnlySaveEnabled = await quick.evaluate(
+      `[...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === '保存' && !button.disabled)`,
+    );
+    if (!contentOnlySaveEnabled) throw new Error("content-only quick note must be saveable");
     await clickButton(quick, "保存");
     await waitFor(
       async () =>
@@ -563,10 +520,14 @@ async function run() {
       timeout: 10_000,
       label: "quick-note hidden after save",
     });
-    if (dbCountTitle(uniqueTitle) !== 1) {
-      throw new Error(`tip not persisted: ${uniqueTitle}`);
+    const savedTip = dbReadTipByContent(uniqueContent);
+    if (savedTip.count !== 1 || savedTip.title !== null) {
+      throw new Error(`titleless tip not persisted correctly: ${JSON.stringify(savedTip)}`);
     }
-    console.log("8. quick-note 保存 -> 自动隐藏, Tip 已写入 SQLite  PASS");
+    if (JSON.stringify(savedTip.tags) !== JSON.stringify(["runtime-tag"])) {
+      throw new Error(`pending tag input not persisted: ${JSON.stringify(savedTip)}`);
+    }
+    console.log("8. quick-note 无标题 + 自由标签 + 无 Agent 保存 -> SQLite 原子写入  PASS");
 
     // 9 + 10. 下一次打开：正文为空 + 颜色重新请求
     // reset 契约：reset() 必先 setDraftColor(null) 再调用 suggestNoteColor，
@@ -587,6 +548,23 @@ async function run() {
         `document.querySelector('[data-note-color]')?.getAttribute('data-note-color') ?? null`,
       );
       if (!colorKey) throw new Error(`color missing on cycle ${cycle}`);
+      if (cycle === 1) {
+        await quick.evaluate(`(() => {
+          const input = document.querySelector('input[aria-label="添加标签"]');
+          input?.focus();
+          input?.click();
+        })()`);
+        await waitFor(
+          async () =>
+            Boolean(
+              await quick.tryEval(
+                `[...document.querySelectorAll('[role="option"]')].some((option) => option.textContent?.includes('runtime-tag'))`,
+              ),
+            ),
+          { timeout: 5_000, label: "persisted tag appears as reusable suggestion" },
+        );
+        console.log("   已保存标签在下一次 Quick Note 中可点击复用  PASS");
+      }
       await quick.evaluate(
         `window.__TAURI_INTERNALS__.invoke('window_hide_current', { label: 'quick-note' })`,
       );
@@ -594,16 +572,54 @@ async function run() {
     }
     console.log("9. 下次打开正文为空  PASS | 10. 颜色每次重新请求（非概率断言）  PASS");
 
-    // 7. Esc -> hide
+    // 7. Esc 与系统标题栏关闭：非空草稿必须确认，取消后保留，确认后才隐藏
+    await openWindow("quick-note");
     await setTextarea(quick, "正文", "esc-cancel-content");
     await quick.evaluate(
       `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))`,
     );
+    await waitFor(
+      async () =>
+        Boolean(
+          await quick.tryEval(
+            `document.querySelector('[role="dialog"]')?.textContent.includes('放弃这条便签')`,
+          ),
+        ),
+      { timeout: 5_000, label: "discard confirmation after Esc" },
+    );
+    if (!(await isVisible(quick))) throw new Error("quick-note hidden before discard confirmation");
+    const keptAfterEsc = await quick.evaluate(
+      `document.querySelector('textarea[aria-label="正文"]')?.value ?? null`,
+    );
+    if (keptAfterEsc !== "esc-cancel-content") {
+      throw new Error(`draft changed before confirmation: ${keptAfterEsc}`);
+    }
+    await clickButton(quick, "继续编辑");
+    await waitFor(
+      async () =>
+        !(await quick.tryEval(
+          `document.querySelector('[role="dialog"]')?.textContent.includes('放弃这条便签')`,
+        )),
+      { timeout: 5_000, label: "discard confirmation cancelled" },
+    );
+
+    await quick.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:window|close')`);
+    await waitFor(
+      async () =>
+        Boolean(
+          await quick.tryEval(
+            `document.querySelector('[role="dialog"]')?.textContent.includes('放弃这条便签')`,
+          ),
+        ),
+      { timeout: 5_000, label: "discard confirmation after native close" },
+    );
+    if (!(await isVisible(quick))) throw new Error("native close bypassed discard confirmation");
+    await clickButton(quick, "放弃内容");
     await waitFor(async () => !(await isVisible(quick)), {
       timeout: 5_000,
-      label: "quick-note hidden after Esc",
+      label: "quick-note hidden after confirmed discard",
     });
-    console.log("7. quick-note Esc -> hide  PASS");
+    console.log("7. Esc/native close -> confirm, cancel keeps draft, discard hides  PASS");
 
     // Draft 保留：已可见再打开不清空
     await openWindow("quick-note");
@@ -684,13 +700,25 @@ async function run() {
     try {
       await main.evaluate(`window.__TAURI_INTERNALS__.invoke('window_quit')`);
     } catch {
-      // 第二实例唤醒可能重建 WebView：重建连接后重试 quit
-      for (const [kind, existing] of [...clients.entries()]) {
-        existing.close();
-        clients.delete(kind);
+      // quit 成功会先关闭 WebView，CDP Promise 可能因此 reject；只有进程仍在时才重连重试。
+      let appAlreadyExited = false;
+      try {
+        await waitFor(async () => getProcessCount() === 0, {
+          timeout: 3_000,
+          label: "app process exited after quit disconnect",
+        });
+        appAlreadyExited = true;
+      } catch {
+        // 第二实例唤醒也可能重建 WebView，此时仍需重连并再次请求退出。
       }
-      main = await ensureClient("main");
-      await main.evaluate(`window.__TAURI_INTERNALS__.invoke('window_quit')`);
+      if (!appAlreadyExited) {
+        for (const [kind, existing] of [...clients.entries()]) {
+          existing.close();
+          clients.delete(kind);
+        }
+        main = await ensureClient("main");
+        await main.evaluate(`window.__TAURI_INTERNALS__.invoke('window_quit')`);
+      }
     }
     await waitAppStopped();
     if (getProcessCount() !== 0) {

@@ -11,6 +11,7 @@ import type {
   DesktopDetectionStatus,
   MockFailureKind,
   NoteColorKey,
+  QuickNoteCloseRequestedPayload,
   QuickNoteResetPayload,
   ReminderPayloadDto,
   ReminderSettings,
@@ -173,6 +174,7 @@ interface SeedTip {
   id: string;
   title: string;
   content: string;
+  tags: string[];
   status: "active" | "archived";
   colorKey: NoteColorKey;
   usedAt: string | null;
@@ -197,6 +199,7 @@ const SEED_USED_TIP: SeedTip = {
   id: "tip-used-1",
   title: "已使用的示例",
   content: "这条便签已经完成使命，收进「已使用」盒子。",
+  tags: ["已完成"],
   status: "active",
   colorKey: "sage",
   usedAt: "2026-08-06T13:00:00.000Z",
@@ -204,7 +207,9 @@ const SEED_USED_TIP: SeedTip = {
   bindings: [{ agentId: AGENT_IDS.codex, autoAttach: true }],
 };
 
-type SeedTipBase = Omit<SeedTip, "colorKey" | "usedAt" | "updatedAt">;
+type SeedTipBase = Omit<SeedTip, "colorKey" | "usedAt" | "updatedAt" | "tags"> & {
+  tags?: string[];
+};
 
 function seedColorFor(id: string): NoteColorKey {
   let hash = 0x811c9dc5;
@@ -220,6 +225,7 @@ const SEED_TIPS: SeedTipBase[] = [
     id: "tip-1",
     title: "修改前解释调用链",
     content: "修改任何核心模块前，先用一两句话说明调用链和影响范围。",
+    tags: ["代码审查", "调用链"],
     status: "active",
     bindings: [
       { agentId: AGENT_IDS.cursor, autoAttach: true },
@@ -230,6 +236,7 @@ const SEED_TIPS: SeedTipBase[] = [
     id: "tip-2",
     title: "完成后运行全部测试",
     content: "提交前运行 pnpm test、cargo test 与 acceptance 脚本。",
+    tags: ["测试"],
     status: "active",
     bindings: [{ agentId: AGENT_IDS.claudeCode, autoAttach: true }],
   },
@@ -270,6 +277,7 @@ const SEED_TIPS: SeedTipBase[] = [
     id: "tip-7",
     title: "迁移先备份",
     content: "任何数据库迁移前先确认备份存在，迁移失败时保留原库不清空。",
+    tags: ["数据库", "迁移"],
     status: "active",
     bindings: [{ agentId: AGENT_IDS.claudeCode, autoAttach: true }],
   },
@@ -391,7 +399,13 @@ const SEED_TIPS: SeedTipBase[] = [
 ];
 
 function withSeedMeta(tip: SeedTipBase): SeedTip {
-  return { ...tip, colorKey: seedColorFor(tip.id), usedAt: null, updatedAt: FIXED_NOW };
+  return {
+    ...tip,
+    tags: [...(tip.tags ?? [])],
+    colorKey: seedColorFor(tip.id),
+    usedAt: null,
+    updatedAt: FIXED_NOW,
+  };
 }
 
 const SEED_SETTINGS: AppSettings = {
@@ -418,6 +432,7 @@ function summarize(tip: SeedTip): TipSummary {
     id: tip.id,
     title: tip.title,
     content: tip.content,
+    tags: [...tip.tags],
     status: tip.status,
     updatedAt: FIXED_NOW,
     colorKey: tip.colorKey,
@@ -435,6 +450,7 @@ function detailOf(tip: SeedTip): TipDetail {
     id: tip.id,
     title: tip.title,
     content: tip.content,
+    tags: [...tip.tags],
     status: tip.status,
     updatedAt: FIXED_NOW,
     colorKey: tip.colorKey,
@@ -462,18 +478,27 @@ export class MockDesktopApi implements DesktopApi {
   private saveDelayMs = 0;
   windowCalls: string[] = [];
   hotkeyCalls: string[] = [];
-  private listeners: { quickNoteReset: Array<(payload: QuickNoteResetPayload) => void> } = {
+  private listeners: {
+    quickNoteReset: Array<(payload: QuickNoteResetPayload) => void>;
+    quickNoteCloseRequested: Array<(payload: QuickNoteCloseRequestedPayload) => void>;
+  } = {
     quickNoteReset: [],
+    quickNoteCloseRequested: [],
   };
 
   constructor(options?: { withSeed?: boolean; withUsedTip?: boolean }) {
     this.agents = SEED_AGENTS.map((agent) => ({ ...agent }));
     this.tips = (options?.withSeed === false ? [] : SEED_TIPS).map((tip) => ({
       ...withSeedMeta(tip),
+      tags: [...(tip.tags ?? [])],
       bindings: tip.bindings.map((b) => ({ ...b })),
     }));
     if (options?.withSeed !== false && options?.withUsedTip !== false) {
-      this.tips.push({ ...SEED_USED_TIP, bindings: SEED_USED_TIP.bindings.map((b) => ({ ...b })) });
+      this.tips.push({
+        ...SEED_USED_TIP,
+        tags: [...SEED_USED_TIP.tags],
+        bindings: SEED_USED_TIP.bindings.map((b) => ({ ...b })),
+      });
     }
     this.settings = {
       ...SEED_SETTINGS,
@@ -498,10 +523,26 @@ export class MockDesktopApi implements DesktopApi {
       const needle = query.search.trim().toLowerCase();
       items = items.filter(
         (tip) =>
-          tip.title.toLowerCase().includes(needle) || tip.content.toLowerCase().includes(needle),
+          tip.title.toLowerCase().includes(needle) ||
+          tip.content.toLowerCase().includes(needle) ||
+          tip.tags.some((tag) => tag.toLowerCase().includes(needle)),
       );
     }
     return items;
+  }
+
+  async listTags(): Promise<string[]> {
+    const seen = new Set<string>();
+    const tags: string[] = [];
+    for (const tip of this.tips) {
+      for (const tag of tip.tags) {
+        const key = tag.toLocaleLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        tags.push(tag);
+      }
+    }
+    return tags;
   }
 
   async getTip(id: string): Promise<TipDetail | null> {
@@ -527,15 +568,20 @@ export class MockDesktopApi implements DesktopApi {
     }));
     const tip: SeedTip = {
       id: `tip-${this.tips.length + 1}`,
-      title: input.title?.trim() || firstLine(content),
+      title: input.title?.trim() ?? "",
       content,
+      tags: normalizeMockTags(input.tags ?? []),
       status: "active",
       colorKey: input.colorKey ?? (await this.suggestNoteColor()),
       usedAt: null,
       updatedAt: now,
       bindings: input.bindings.map((b) => ({ ...b })),
     };
-    this.tips.unshift({ ...tip, bindings: tip.bindings.map((b) => ({ ...b })) });
+    this.tips.unshift({
+      ...tip,
+      tags: [...tip.tags],
+      bindings: tip.bindings.map((b) => ({ ...b })),
+    });
     return { ...detailOf(tip), updatedAt: now, bindings };
   }
 
@@ -548,7 +594,7 @@ export class MockDesktopApi implements DesktopApi {
       throw new Error(`便签不存在: ${id}`);
     }
     if (input.title !== undefined) {
-      tip.title = input.title.trim() || firstLine(tip.content);
+      tip.title = input.title.trim();
     }
     if (input.content !== undefined) {
       const content = input.content.trim();
@@ -559,6 +605,9 @@ export class MockDesktopApi implements DesktopApi {
     }
     if (input.bindings !== undefined) {
       tip.bindings = input.bindings.map((b) => ({ ...b }));
+    }
+    if (input.tags !== undefined) {
+      tip.tags = normalizeMockTags(input.tags);
     }
     return detailOf(tip);
   }
@@ -600,7 +649,8 @@ export class MockDesktopApi implements DesktopApi {
     const previousColor = tip.colorKey;
     const previousUsedAt = tip.usedAt;
     const previousBindings = tip.bindings;
-    tip.title = title.trim() || firstLine(tip.content);
+    const previousTags = tip.tags;
+    tip.title = title.trim();
     tip.content = trimmed;
     tip.updatedAt = new Date().toISOString();
     const result = detailOf(tip);
@@ -610,6 +660,7 @@ export class MockDesktopApi implements DesktopApi {
     tip.colorKey = previousColor;
     tip.usedAt = previousUsedAt;
     tip.bindings = previousBindings;
+    tip.tags = previousTags;
     return result;
   }
 
@@ -684,6 +735,22 @@ export class MockDesktopApi implements DesktopApi {
 
   private emitQuickNoteReset(payload: QuickNoteResetPayload): void {
     this.listeners.quickNoteReset.forEach((handler) => handler(payload));
+  }
+
+  async subscribeQuickNoteCloseRequested(
+    handler: (payload: QuickNoteCloseRequestedPayload) => void,
+  ): Promise<() => void> {
+    this.listeners.quickNoteCloseRequested.push(handler);
+    return () => {
+      const idx = this.listeners.quickNoteCloseRequested.indexOf(handler);
+      if (idx >= 0) this.listeners.quickNoteCloseRequested.splice(idx, 1);
+    };
+  }
+
+  /** 测试/浏览器模拟：模拟系统标题栏关闭请求。 */
+  simulateQuickNoteCloseRequested(): void {
+    const payload = { requestedAt: new Date().toISOString() };
+    this.listeners.quickNoteCloseRequested.forEach((handler) => handler(payload));
   }
 
   async listAgents(): Promise<Agent[]> {
@@ -830,6 +897,7 @@ export class MockDesktopApi implements DesktopApi {
     this.agents = SEED_AGENTS.map((agent) => ({ ...agent }));
     this.tips = SEED_TIPS.map((tip) => ({
       ...withSeedMeta(tip),
+      tags: [...(tip.tags ?? [])],
       bindings: tip.bindings.map((b) => ({ ...b })),
     }));
     this.settings = {
@@ -855,6 +923,18 @@ function clonePayload(payload: ReminderPayloadDto): ReminderPayloadDto {
   };
 }
 
-function firstLine(content: string): string {
-  return content.trim().split(/\r?\n/, 1)[0]?.trim() ?? content;
+function normalizeMockTags(values: string[]): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const name = value.trim().replace(/^#+/, "").trim().replace(/\s+/g, " ");
+    if (!name) continue;
+    if ([...name].length > 32) throw new Error(`标签“${name}”不能超过 32 个字符`);
+    const key = name.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(name);
+  }
+  if (tags.length > 8) throw new Error("每条便签最多添加 8 个标签");
+  return tags;
 }

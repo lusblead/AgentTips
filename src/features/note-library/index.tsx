@@ -166,7 +166,9 @@ export default function NoteLibraryWindow({
       }
       if (needle) {
         return (
-          tip.title.toLowerCase().includes(needle) || tip.content.toLowerCase().includes(needle)
+          tip.title.toLowerCase().includes(needle) ||
+          tip.content.toLowerCase().includes(needle) ||
+          tip.tags.some((tag) => tag.toLowerCase().includes(needle))
         );
       }
       return true;
@@ -220,6 +222,7 @@ export default function NoteLibraryWindow({
       ...tip,
       title: updated.title,
       content: updated.content,
+      tags: updated.tags,
       colorKey: updated.colorKey,
       agentIds: updated.bindings.map((b) => b.agentId),
       updatedAt: updated.updatedAt,

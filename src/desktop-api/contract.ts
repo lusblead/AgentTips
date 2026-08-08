@@ -128,20 +128,27 @@ export interface AppSettings {
   hotkey: HotkeyBinding;
 }
 
-export interface ReminderPreviewAgent {
-  id: string;
-  name: string;
+/** Reminder 单条便签内容（只含用户自己保存的 Tip 内容 + 颜色）。 */
+export interface ReminderTipDto {
+  tipId: string;
+  title?: string | null;
+  body: string;
+  colorKey: NoteColorKey;
 }
 
-export interface ReminderTip {
-  id: string;
-  title: string;
-  content: string;
+/** Reminder 载荷：Agent + 该 Agent 当前有效 Default Carry Tips。 */
+export interface ReminderPayloadDto {
+  agentKey: string;
+  agentId: string;
+  agentDisplayName: string;
+  tips: ReminderTipDto[];
+  generatedAt: string;
 }
 
-export interface ReminderPreview {
-  agent: ReminderPreviewAgent;
-  tips: ReminderTip[];
+/** Reminder 全局设置（cooldown 分钟，1 ～ 120）。 */
+export interface ReminderSettings {
+  cooldownMinutes: number;
+  updatedAt: string;
 }
 
 /** 快捷窗口每次显示前由后端发出的重置事件（新 Draft Session）。 */
@@ -223,7 +230,14 @@ export interface DesktopApi {
   endHotkeyRecording(): Promise<void>;
   getDesktopDetectionStatus(): Promise<DesktopDetectionStatus>;
 
-  getReminderPreview(): Promise<ReminderPreview>;
+  getReminderSettings(): Promise<ReminderSettings>;
+  updateReminderSettings(cooldownMinutes: number): Promise<ReminderSettings>;
+  /** 隐藏/忽略当前 Reminder（不更新 cooldown）。 */
+  dismissReminder(): Promise<void>;
+  /** Reminder 窗口加载兜底：拉取最近一次成功展示的 payload。 */
+  getCurrentReminderPayload(): Promise<ReminderPayloadDto | null>;
+  /** 订阅 Reminder 展示事件（payload 出现/替换）。 */
+  subscribeReminderShow(handler: (payload: ReminderPayloadDto) => void): Promise<() => void>;
 
   /** 订阅快捷窗口 reset（新 Draft Session）。Tauri 下由 Window Manager show 时触发。 */
   subscribeQuickNoteReset(handler: (payload: QuickNoteResetPayload) => void): Promise<() => void>;

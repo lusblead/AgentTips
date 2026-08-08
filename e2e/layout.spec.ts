@@ -26,17 +26,17 @@ test.describe("布局溢出检查", () => {
   });
 
   test("提醒窗口卡片在视口内", async ({ page }) => {
-    await page.setViewportSize({ width: 420, height: 360 });
-    await page.goto("/?window=reminder");
+    await page.setViewportSize({ width: 480, height: 560 });
+    await page.goto("/?window=reminder&demo=expanded");
     const dialog = page.getByRole("dialog", { name: "Cursor 提醒" });
     await expect(dialog).toBeVisible();
     const box = await dialog.boundingBox();
     expect(box).not.toBeNull();
     if (box) {
       expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width).toBeLessThanOrEqual(420);
+      expect(box.x + box.width).toBeLessThanOrEqual(480);
       expect(box.y).toBeGreaterThanOrEqual(0);
-      expect(box.y + box.height).toBeLessThanOrEqual(360);
+      expect(box.y + box.height).toBeLessThanOrEqual(560);
     }
   });
 

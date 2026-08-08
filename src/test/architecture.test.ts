@@ -268,4 +268,49 @@ describe("架构边界（静态检查）", () => {
     }
     expect(violations).toEqual([]);
   });
+
+  it("React 不自行计算 Reminder cooldown（不得轮询 detection 决定提醒）", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("getDesktopDetectionStatus") || content.includes("setInterval")) {
+        violations.push(relative(src, file));
+      }
+    }
+    // reminder feature 不得出现 cooldown 决策字段（设置页展示配置值允许）
+    for (const file of listFiles(join(featuresDir, "reminder"))) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("cooldownMinutes")) {
+        violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Detection adapter 不得直接引用 Reminder/TipRepository（Reminder 只能经 Coordinator）", () => {
+    const violations: string[] = [];
+    for (const file of listRustFiles(join(srcTauri, "src", "adapters"))) {
+      if (!file.includes("windows_foreground") && !file.includes("windows_process_tree")) {
+        continue;
+      }
+      const content = readFileSync(file, "utf8");
+      for (const forbidden of ["ReminderPresenter", "TipRepository", "ReminderCoordinator"]) {
+        if (content.includes(forbidden)) {
+          violations.push(`${relative(root, file)} -> ${forbidden}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust ports 不依赖具体 Tauri window 类型", () => {
+    const violations: string[] = [];
+    for (const file of listRustFiles(join(srcTauri, "src", "ports"))) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("WebviewWindow") || content.includes("AppHandle")) {
+        violations.push(relative(root, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
 });

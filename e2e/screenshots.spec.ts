@@ -91,7 +91,7 @@ test.describe("Phase 1.5 视觉截图", () => {
 
   test("提醒窗口：展开", async ({ page }) => {
     const errors = trackErrors(page);
-    await setup(page, VIEWPORTS.reminder, "/?window=reminder");
+    await setup(page, VIEWPORTS.reminder, "/?window=reminder&demo=expanded");
     await expect(page.getByRole("dialog", { name: "Cursor 提醒" })).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "reminder-expanded.png") });
     expect(errors).toEqual([]);
@@ -144,7 +144,7 @@ test.describe("Phase 2.2 补充截图（浏览器 Mock）", () => {
     });
     page.on("pageerror", (error) => errors.push(String(error)));
     await page.setViewportSize({ width: 420, height: 360 });
-    await page.goto("/?window=reminder");
+    await page.goto("/?window=reminder&demo=expanded");
     await expect(page.getByRole("dialog", { name: "Cursor 提醒" })).toBeVisible();
     await page.screenshot({ path: join(PHASE22, "reminder-expanded.png") });
     expect(errors).toEqual([]);

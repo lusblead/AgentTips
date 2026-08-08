@@ -21,7 +21,7 @@ describe("窗口路由", () => {
   });
 
   it("?window=reminder 进入提醒窗口", async () => {
-    visit("/?window=reminder");
+    visit("/?window=reminder&demo=expanded");
     render(<App />);
     expect(await screen.findByRole("dialog", { name: "Cursor 提醒" })).toBeInTheDocument();
     expect(screen.getByText("3 条提示")).toBeInTheDocument();
@@ -62,25 +62,27 @@ describe("UI 开发文字清理", () => {
     "开发阶段",
   ];
 
-  it.each(["/?window=main", "/?window=quick-note", "/?window=reminder", "/?window=settings"])(
-    "%s 不含开发阶段文字",
-    async (path) => {
-      visit(path);
-      const { unmount } = render(<App />);
-      if (path === "/?window=main") {
-        await screen.findByText("AgentTips");
-      } else if (path === "/?window=quick-note") {
-        await screen.findByText("新建提示");
-      } else if (path === "/?window=settings") {
-        await screen.findByText("设置");
-      } else {
-        await screen.findByText("3 条提示");
-      }
-      const bodyText = document.body.textContent ?? "";
-      for (const text of forbidden) {
-        expect(bodyText).not.toContain(text);
-      }
-      unmount();
-    },
-  );
+  it.each([
+    "/?window=main",
+    "/?window=quick-note",
+    "/?window=reminder&demo=expanded",
+    "/?window=settings",
+  ])("%s 不含开发阶段文字", async (path) => {
+    visit(path);
+    const { unmount } = render(<App />);
+    if (path === "/?window=main") {
+      await screen.findByText("AgentTips");
+    } else if (path === "/?window=quick-note") {
+      await screen.findByText("新建提示");
+    } else if (path === "/?window=settings") {
+      await screen.findByText("设置");
+    } else {
+      await screen.findByText("3 条提示");
+    }
+    const bodyText = document.body.textContent ?? "";
+    for (const text of forbidden) {
+      expect(bodyText).not.toContain(text);
+    }
+    unmount();
+  });
 });

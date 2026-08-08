@@ -7,6 +7,7 @@ pub enum WindowLabel {
     Main,
     QuickNote,
     Settings,
+    Reminder,
 }
 
 impl WindowLabel {
@@ -15,6 +16,7 @@ impl WindowLabel {
             WindowLabel::Main => "main",
             WindowLabel::QuickNote => "quick-note",
             WindowLabel::Settings => "settings",
+            WindowLabel::Reminder => "reminder",
         }
     }
 
@@ -23,6 +25,7 @@ impl WindowLabel {
             "main" => Ok(WindowLabel::Main),
             "quick-note" => Ok(WindowLabel::QuickNote),
             "settings" => Ok(WindowLabel::Settings),
+            "reminder" => Ok(WindowLabel::Reminder),
             other => Err(crate::error::AppError::Validation(format!(
                 "未知窗口: {other}"
             ))),
@@ -38,6 +41,8 @@ pub trait WindowManagerPort: Send + Sync {
     fn hide(&self, label: WindowLabel) -> AppResult<()>;
     /// 聚焦并置前。
     fn focus(&self, label: WindowLabel) -> AppResult<()>;
+    /// 显示但不激活（不抢当前外部应用键盘焦点）。Reminder 使用。
+    fn show_without_activation(&self, label: WindowLabel) -> AppResult<()>;
     /// 窗口当前是否可见。
     fn is_visible(&self, label: WindowLabel) -> AppResult<bool>;
     /// 主窗口尺寸（真实 Quick Note 尺寸验收用）。

@@ -6,6 +6,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::application::reminder::ReminderCoordinatorPort;
 use crate::application::terminal::TerminalAgentDetector;
 use crate::domain::detection::{
     executable_matches_rule, normalize_path, reduce_transition, DesktopAgentRule, DetectionResult,
@@ -132,6 +133,7 @@ pub struct ForegroundWatcher {
     detector: Arc<DesktopAgentDetector>,
     terminal_context: Arc<dyn TerminalContextProviderPort>,
     terminal_detector: Arc<TerminalAgentDetector>,
+    reminder: Option<Arc<dyn ReminderCoordinatorPort>>,
     clock: Arc<dyn Clock>,
     state: Arc<Mutex<DesktopDetectionRuntimeState>>,
     last_hwnd: Arc<Mutex<u64>>,
@@ -147,6 +149,7 @@ impl ForegroundWatcher {
         detector: Arc<DesktopAgentDetector>,
         terminal_context: Arc<dyn TerminalContextProviderPort>,
         terminal_detector: Arc<TerminalAgentDetector>,
+        reminder: Option<Arc<dyn ReminderCoordinatorPort>>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
@@ -154,6 +157,7 @@ impl ForegroundWatcher {
             detector,
             terminal_context,
             terminal_detector,
+            reminder,
             clock,
             state: Arc::new(Mutex::new(DesktopDetectionRuntimeState {
                 current_detection: None,
@@ -260,6 +264,9 @@ impl ForegroundWatcher {
                 "[agenttips] agent_detection_changed transition={:?} process_basename={} match_kind={}",
                 transition, basename, kind,
             );
+            if let Some(reminder) = &self.reminder {
+                reminder.on_detection_change(&final_result, &transition);
+            }
         }
         Ok(())
     }
@@ -313,6 +320,7 @@ impl ForegroundWatcher {
         let detector = self.detector.clone();
         let terminal_context = self.terminal_context.clone();
         let terminal_detector = self.terminal_detector.clone();
+        let reminder = self.reminder.clone();
         let clock = self.clock.clone();
         let state = self.state.clone();
         let last_hwnd = self.last_hwnd.clone();
@@ -429,6 +437,9 @@ impl ForegroundWatcher {
                             "[agenttips] agent_detection_changed transition={:?} process_basename={} match_kind={}",
                             transition, basename, kind,
                         );
+                        if let Some(reminder) = &reminder {
+                            reminder.on_detection_change(&final_result, &transition);
+                        }
                     }
                     std::thread::sleep(POLL_INTERVAL);
                 }
@@ -662,6 +673,7 @@ mod tests {
             detector,
             terminal_context,
             Arc::new(noop_terminal_detector()),
+            None,
             clock,
         )
     }

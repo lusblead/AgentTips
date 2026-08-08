@@ -12,7 +12,9 @@ import type {
   MockFailureKind,
   NoteColorKey,
   QuickNoteResetPayload,
-  ReminderPreview,
+  ReminderPayloadDto,
+  ReminderSettings,
+  ReminderTipDto,
   TipDetail,
   TipBindingDto,
   TipQuery,
@@ -398,12 +400,16 @@ const SEED_SETTINGS: AppSettings = {
   hotkey: hotkeyBinding("F12"),
 };
 
-const SEED_REMINDER_PREVIEW: ReminderPreview = {
-  agent: { id: AGENT_IDS.cursor, name: "Cursor" },
-  tips: SEED_TIPS.slice(0, 3).map((tip) => ({
-    id: tip.id,
+const SEED_REMINDER_PAYLOAD: ReminderPayloadDto = {
+  agentKey: "cursor",
+  agentId: AGENT_IDS.cursor,
+  agentDisplayName: "Cursor",
+  generatedAt: FIXED_NOW,
+  tips: SEED_TIPS.slice(0, 3).map((tip): ReminderTipDto => ({
+    tipId: tip.id,
     title: tip.title,
-    content: tip.content,
+    body: tip.content,
+    colorKey: seedColorFor(tip.id),
   })),
 };
 
@@ -445,7 +451,9 @@ export class MockDesktopApi implements DesktopApi {
   private agents: Agent[];
   private tips: SeedTip[];
   private settings: AppSettings;
-  private reminderPreview: ReminderPreview;
+  private reminderSettings: ReminderSettings;
+  private currentReminderPayload: ReminderPayloadDto | null;
+  private reminderShowListeners: Array<(payload: ReminderPayloadDto) => void>;
   private failures: Record<MockFailureKind, boolean> = {
     save: false,
     delete: false,
@@ -471,10 +479,12 @@ export class MockDesktopApi implements DesktopApi {
       ...SEED_SETTINGS,
       hotkey: { ...SEED_SETTINGS.hotkey },
     };
-    this.reminderPreview = {
-      agent: { ...SEED_REMINDER_PREVIEW.agent },
-      tips: SEED_REMINDER_PREVIEW.tips.map((tip) => ({ ...tip })),
+    this.reminderSettings = {
+      cooldownMinutes: 15,
+      updatedAt: FIXED_NOW,
     };
+    this.currentReminderPayload = null;
+    this.reminderShowListeners = [];
   }
 
   async listTips(query?: TipQuery): Promise<TipSummary[]> {
@@ -761,11 +771,50 @@ export class MockDesktopApi implements DesktopApi {
     };
   }
 
-  async getReminderPreview(): Promise<ReminderPreview> {
-    return {
-      agent: { ...this.reminderPreview.agent },
-      tips: this.reminderPreview.tips.map((tip) => ({ ...tip })),
+  async getReminderSettings(): Promise<ReminderSettings> {
+    return { ...this.reminderSettings };
+  }
+
+  async updateReminderSettings(cooldownMinutes: number): Promise<ReminderSettings> {
+    if (cooldownMinutes < 1 || cooldownMinutes > 120) {
+      throw Object.assign(new Error("冷却时长必须在 1 ～ 120 分钟之间"), {
+        code: "VALIDATION_ERROR",
+      });
+    }
+    this.reminderSettings = {
+      cooldownMinutes,
+      updatedAt: FIXED_NOW,
     };
+    return { ...this.reminderSettings };
+  }
+
+  async dismissReminder(): Promise<void> {
+    this.currentReminderPayload = null;
+    return undefined;
+  }
+
+  async getCurrentReminderPayload(): Promise<ReminderPayloadDto | null> {
+    return this.currentReminderPayload ? clonePayload(this.currentReminderPayload) : null;
+  }
+
+  async subscribeReminderShow(handler: (payload: ReminderPayloadDto) => void): Promise<() => void> {
+    this.reminderShowListeners.push(handler);
+    return () => {
+      this.reminderShowListeners = this.reminderShowListeners.filter((h) => h !== handler);
+    };
+  }
+
+  /** 测试/调试辅助：模拟后端展示事件（不进入生产 Tauri 路径）。 */
+  emitReminder(payload: ReminderPayloadDto): void {
+    this.currentReminderPayload = clonePayload(payload);
+    for (const handler of [...this.reminderShowListeners]) {
+      handler(clonePayload(payload));
+    }
+  }
+
+  /** 测试/调试辅助：返回内置固定演示 payload。 */
+  seedReminderPayload(): ReminderPayloadDto {
+    return clonePayload(SEED_REMINDER_PAYLOAD);
   }
 
   setMockFailure(kind: MockFailureKind, enabled: boolean): void {
@@ -787,14 +836,23 @@ export class MockDesktopApi implements DesktopApi {
       ...SEED_SETTINGS,
       hotkey: { ...SEED_SETTINGS.hotkey },
     };
-    this.reminderPreview = {
-      agent: { ...SEED_REMINDER_PREVIEW.agent },
-      tips: SEED_REMINDER_PREVIEW.tips.map((tip) => ({ ...tip })),
+    this.reminderSettings = {
+      cooldownMinutes: 15,
+      updatedAt: FIXED_NOW,
     };
+    this.currentReminderPayload = null;
+    this.reminderShowListeners = [];
     this.failures = { save: false, delete: false, hotkey: false };
     this.saveDelayMs = 0;
     this.windowCalls = [];
   }
+}
+
+function clonePayload(payload: ReminderPayloadDto): ReminderPayloadDto {
+  return {
+    ...payload,
+    tips: payload.tips.map((tip) => ({ ...tip })),
+  };
 }
 
 function firstLine(content: string): string {

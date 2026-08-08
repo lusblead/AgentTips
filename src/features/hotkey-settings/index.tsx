@@ -9,6 +9,7 @@ import type {
   HotkeyBinding,
   HotkeyCandidate,
   HotkeyPreviewResult,
+  ReminderSettings,
 } from "@/desktop-api/contract";
 import { hotkeyDisplayKey } from "@/desktop-api";
 
@@ -319,10 +320,110 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
 const SECTIONS: Array<{ id: string; label: string; disabled?: boolean }> = [
   { id: "hotkey", label: "快捷键" },
   { id: "regular", label: "常规", disabled: true },
-  { id: "reminder", label: "提醒", disabled: true },
+  { id: "reminder", label: "提醒" },
   { id: "data", label: "数据", disabled: true },
   { id: "about", label: "关于", disabled: true },
 ];
+
+function ReminderSettingsSection({ api }: { api: DesktopApi }) {
+  const [value, setValue] = useState("15");
+  const [saved, setSaved] = useState<number>(15);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getReminderSettings()
+      .then((settings: ReminderSettings) => {
+        if (cancelled) return;
+        setSaved(settings.cooldownMinutes);
+        setValue(String(settings.cooldownMinutes));
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(desktopErrorMessage(err));
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  async function save() {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 120) {
+      setError("冷却时长必须在 1 ～ 120 分钟之间");
+      setValue(String(saved));
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api.updateReminderSettings(parsed);
+      setSaved(updated.cooldownMinutes);
+      setValue(String(updated.cooldownMinutes));
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 1500);
+    } catch (err) {
+      // 保存失败：保留旧值
+      setError(desktopErrorMessage(err));
+      setValue(String(saved));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <p className="text-secondary-size text-text-muted">加载中…</p>;
+  }
+
+  return (
+    <div className="mx-auto flex max-w-xl flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-section font-semibold">提醒冷却</h3>
+        <p className="text-secondary-size text-text-muted">
+          进入 Agent 后，同一 Agent 在冷却时间内不再重复提醒。
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        <label htmlFor="reminder-cooldown" className="shrink-0 text-secondary-size text-text-muted">
+          冷却时长（分钟）
+        </label>
+        <input
+          id="reminder-cooldown"
+          type="number"
+          min={1}
+          max={120}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          className="w-28 rounded-md border border-border-default bg-surface-primary px-3 py-2 text-body"
+          data-testid="reminder-cooldown-input"
+        />
+        <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
+          {saving ? "保存中…" : "保存"}
+        </Button>
+      </div>
+      <p className="text-secondary-size text-text-muted">
+        允许范围 1 ～ 120 分钟（默认 15）。冷却按 Agent 独立记录。
+      </p>
+      {error && (
+        <p className="text-secondary-size text-danger" role="alert">
+          {error} · 当前仍为 {saved} 分钟
+        </p>
+      )}
+      {success && (
+        <p className="text-secondary-size text-success" role="status">
+          已保存 {saved} 分钟
+        </p>
+      )}
+    </div>
+  );
+}
 
 export interface HotkeySettingsWindowProps {
   api: DesktopApi;
@@ -410,6 +511,8 @@ export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps)
                 <p className="text-secondary-size text-text-muted">加载中…</p>
               )}
             </div>
+          ) : section === "reminder" ? (
+            <ReminderSettingsSection api={api} />
           ) : (
             <div className="flex h-full items-center justify-center">
               <p className="text-secondary-size text-text-muted">该设置项即将提供</p>

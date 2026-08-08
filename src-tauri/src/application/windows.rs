@@ -92,6 +92,11 @@ mod tests {
             self.focused.lock().unwrap().push(label);
             Ok(())
         }
+        fn show_without_activation(&self, label: WindowLabel) -> AppResult<()> {
+            self.shown.lock().unwrap().push(label);
+            *self.visible.lock().unwrap() = true;
+            Ok(())
+        }
         fn is_visible(&self, _label: WindowLabel) -> AppResult<bool> {
             Ok(*self.visible.lock().unwrap())
         }

@@ -144,11 +144,32 @@ describe("TauriDesktopApi", () => {
     expect(result.agentId).toBe("cursor");
   });
 
-  it("getReminderPreview 明确未实现", async () => {
-    await expect(api.getReminderPreview()).rejects.toMatchObject({
-      code: ERROR_CODES.INTERNAL_ERROR,
-      message: /尚未实现/,
+  it("reminder settings 调用命令并返回 camelCase", async () => {
+    invokeMock.mockResolvedValue({ cooldownMinutes: 15, updatedAt: "2026-08-08T00:00:00Z" });
+    const settings = await api.getReminderSettings();
+    expect(invokeMock).toHaveBeenCalledWith("reminder_settings_get");
+    expect(settings.cooldownMinutes).toBe(15);
+  });
+
+  it("updateReminderSettings 调用更新命令", async () => {
+    invokeMock.mockResolvedValue({ cooldownMinutes: 5, updatedAt: "2026-08-08T00:00:00Z" });
+    const updated = await api.updateReminderSettings(5);
+    expect(invokeMock).toHaveBeenCalledWith("reminder_settings_update", {
+      cooldownMinutes: 5,
     });
+    expect(updated.cooldownMinutes).toBe(5);
+  });
+
+  it("dismissReminder 调用命令", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await api.dismissReminder();
+    expect(invokeMock).toHaveBeenCalledWith("reminder_dismiss");
+  });
+
+  it("getCurrentReminderPayload 兜底拉取当前 payload", async () => {
+    invokeMock.mockResolvedValue(null);
+    await expect(api.getCurrentReminderPayload()).resolves.toBeNull();
+    expect(invokeMock).toHaveBeenCalledWith("reminder_get_current_payload");
   });
 
   it("openMainWindow / openQuickNoteWindow / openSettingsWindow 调用正确 command", async () => {

@@ -19,6 +19,7 @@ import {
   makeLogDir,
   makeTestDataDir,
   moveWindowsToNativeDisplay,
+  probeSyntheticHotkey,
   sleep,
   waitFor,
 } from "./lib/runtime-test-utils.mjs";
@@ -311,6 +312,22 @@ function assertNoPanics() {
 
 async function run() {
   try {
+    const probe = probeSyntheticHotkey();
+    const hotkeyUsable = probe.available;
+    console.log(`hotkey probe: available=${hotkeyUsable} (${probe.reason})`);
+    const openQuickNote = async () => {
+      if (hotkeyUsable) {
+        sendHotkey(0x7b); // Ctrl + F12
+      } else {
+        await main.evaluate(
+          `window.__TAURI_INTERNALS__.invoke('window_open_quick_note')`,
+        );
+        console.log(
+          `  (synthetic hotkey unavailable → window_open_quick_note fallback, reason=${probe.reason})`,
+        );
+      }
+    };
+
     // A. 启动
     startApp();
     const main = await ensureClient("main");
@@ -331,7 +348,7 @@ async function run() {
     );
 
     // C. Hotkey 打开 Quick Note → SelfWindow + effective 保持
-    sendHotkey(0x7b); // Ctrl + F12
+    await openQuickNote();
     const quick = await ensureClient("quick-note");
     await waitFor(async () => isVisible(quick), { timeout: 15_000, label: "quick-note visible" });
     moveWindowsToNativeDisplay({ titles: ["AgentTips", "新建提示", "设置"] });
@@ -356,7 +373,7 @@ async function run() {
 
     // E. 快速前台切换期间不 panic
     for (let i = 0; i < 3; i += 1) {
-      sendHotkey(0x7b);
+      await openQuickNote();
       await sleep(600);
       await detectionStatus(main);
       focusNotepad();

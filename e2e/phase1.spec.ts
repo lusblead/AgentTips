@@ -56,7 +56,7 @@ test.describe("Phase 1.5 交互流程", () => {
 
   test("提醒窗口：聚合、收起与忽略", async ({ page }) => {
     const errors = trackConsole(page);
-    await page.goto("/?window=reminder");
+    await page.goto("/?window=reminder&demo=expanded");
     const dialog = page.getByRole("dialog", { name: "Cursor 提醒" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("3 条提示")).toBeVisible();

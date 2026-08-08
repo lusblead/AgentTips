@@ -18,6 +18,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_init.sql")),
     (2, include_str!("../../migrations/0002_living_notes.sql")),
     (3, include_str!("../../migrations/0003_hotkey_settings.sql")),
+    (
+        4,
+        include_str!("../../migrations/0004_reminder_runtime.sql"),
+    ),
 ];
 
 /// 内置 Agent 初始名单（docs/03-domain-data-model.md）。

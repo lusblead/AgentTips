@@ -15,7 +15,8 @@ import {
   type MockFailureKind,
   type NoteColorKey,
   type QuickNoteResetPayload,
-  type ReminderPreview,
+  type ReminderPayloadDto,
+  type ReminderSettings,
   type TipDetail,
   type TipQuery,
   type TipSummary,
@@ -33,14 +34,6 @@ const FALLBACK_SETTINGS: AppSettings = {
     highConflict: false,
   },
 };
-
-function notImplemented(feature: string): never {
-  const error: DesktopError = {
-    code: ERROR_CODES.INTERNAL_ERROR,
-    message: `${feature} 尚未实现（后续阶段接入）`,
-  };
-  throw error;
-}
 
 /**
  * 把 Tauri invoke 的 rejection 转换为统一 DesktopError。
@@ -282,8 +275,45 @@ export class TauriDesktopApi implements DesktopApi {
     }
   }
 
-  async getReminderPreview(): Promise<ReminderPreview> {
-    return notImplemented("自动提醒");
+  async getReminderSettings(): Promise<ReminderSettings> {
+    try {
+      return await invoke<ReminderSettings>("reminder_settings_get");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateReminderSettings(cooldownMinutes: number): Promise<ReminderSettings> {
+    try {
+      return await invoke<ReminderSettings>("reminder_settings_update", {
+        cooldownMinutes,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async dismissReminder(): Promise<void> {
+    try {
+      await invoke<void>("reminder_dismiss");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getCurrentReminderPayload(): Promise<ReminderPayloadDto | null> {
+    try {
+      return await invoke<ReminderPayloadDto | null>("reminder_get_current_payload");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async subscribeReminderShow(handler: (payload: ReminderPayloadDto) => void): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<ReminderPayloadDto>("agenttips://reminder/show", (event) =>
+      handler(event.payload),
+    );
   }
 
   setMockFailure(_kind: MockFailureKind, _enabled: boolean): void {

@@ -10,7 +10,7 @@ describe("设置页导航", () => {
     const nav = await screen.findByRole("navigation", { name: "设置导航" });
     expect(nav).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /快捷键/ })).toBeInTheDocument();
-    expect(screen.getAllByText("即将提供").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getAllByText("即将提供").length).toBeGreaterThanOrEqual(3);
     expect(await screen.findByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
   });
 

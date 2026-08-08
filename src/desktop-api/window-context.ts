@@ -31,7 +31,8 @@ export function getBrowserWindowContext(): WindowContext {
   const params = new URLSearchParams(window.location.search);
   const kind = kindFromLabel(params.get("window"));
   const demo = params.get("demo");
-  const reminderDemo = demo === "collapsed" || demo === "empty" ? demo : undefined;
+  const reminderDemo =
+    demo === "expanded" || demo === "collapsed" || demo === "empty" ? demo : undefined;
   const initialAgentId = params.get("agentId") ?? undefined;
   const emptyData = params.get("empty") === "1";
   return { kind, reminderDemo, initialAgentId, emptyData };

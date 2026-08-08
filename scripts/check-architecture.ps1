@@ -161,6 +161,39 @@ foreach ($layer in $processBoundaryLayers) {
     }
 }
 
+# 16. React feature 不得自行轮询 detection / 计算 cooldown（Reminder 决策只在 Rust）
+$featureAllFiles = Get-ChildItem -Path (Join-Path $root "src\features") -Recurse -Include *.ts, *.tsx -ErrorAction SilentlyContinue
+foreach ($file in $featureAllFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'getDesktopDetectionStatus|setInterval') {
+        $failures += "feature 轮询 detection 或自行定时计算提醒: $($file.FullName)"
+    }
+    if ($file.FullName -match '\\reminder\\' -and $content -match 'cooldownMinutes') {
+        $failures += "reminder feature 出现 cooldown 决策字段: $($file.FullName)"
+    }
+}
+
+# 17. Detection adapter 不得直接引用 Reminder/TipRepository（Reminder 只能经 Coordinator）
+$detectionAdapters = @("windows_foreground.rs", "windows_process_tree.rs")
+foreach ($adapter in $detectionAdapters) {
+    $adapterPath = Join-Path $root "src-tauri\src\adapters\$adapter"
+    if (Test-Path $adapterPath) {
+        $content = Get-Content -Raw -Encoding UTF8 $adapterPath
+        if ($content -match 'ReminderPresenter|TipRepository|ReminderCoordinator') {
+            $failures += "detection adapter 直接引用 Reminder/TipRepository: $adapterPath"
+        }
+    }
+}
+
+# 18. Rust ports 不依赖具体 Tauri window 类型（仅 adapter）
+$portFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\ports") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+foreach ($file in $portFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'WebviewWindow|AppHandle') {
+        $failures += "ports 依赖具体 Tauri window 类型: $($file.FullName)"
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "check-architecture: FAIL"
     $failures | ForEach-Object { Write-Host "  - $_" }

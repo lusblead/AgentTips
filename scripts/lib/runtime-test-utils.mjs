@@ -224,6 +224,108 @@ export function killProcessTree(rootPid) {
 }
 
 /**
+ * 探测当前 Windows 会话是否支持"合成键盘注入触发全局热键"。
+ *
+ * 方法：创建隐藏消息窗口 → 注册一个专用热键（依次尝试 Ctrl+F10/F11/F12/F9/F8，
+ * 避开已被占用槽位）→ 用 SendInput 合成按下 → 检查 WM_HOTKEY 是否送达 → 注销。
+ *
+ * 某些环境（远程会话 / 输入法 / 安全软件 / 系统合成输入策略）会过滤合成注入，
+ * 导致 WM_HOTKEY 不送达。这是环境限制，不是 AgentTips 产品缺陷；
+ * 全局热键真实行为由人工物理按键 smoke 覆盖（Phase 3B 已 PASS）。
+ *
+ * 返回 { available, reason? }。runtime 测试在 available=false 时
+ * 对依赖合成热键的步骤输出 SKIP WITH REASON 而不是 FAIL。
+ */
+export function probeSyntheticHotkey() {
+  const code = `
+import ctypes, ctypes.wintypes as w, time
+u = ctypes.windll.user32
+WM_HOTKEY = 0x0312
+MOD_CONTROL = 0x0002
+ERROR_HOTKEY_ALREADY_REGISTERED = 1409
+WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+class WNDCLASS(ctypes.Structure):
+    _fields_ = [("style", w.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int), ("hInstance", w.HINSTANCE), ("hIcon", w.HICON),
+                ("hCursor", w.HANDLE), ("hbrBackground", w.HBRUSH), ("lpszMenuName", w.LPCWSTR),
+                ("lpszClassName", w.LPCWSTR)]
+u.DefWindowProcW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+u.DefWindowProcW.restype = ctypes.c_longlong
+received = []
+def wndproc(hwnd, msg, wparam, lparam):
+    if msg == WM_HOTKEY:
+        received.append(1)
+        return 0
+    return u.DefWindowProcW(hwnd, msg, wparam, lparam)
+wc = WNDCLASS()
+wc.lpfnWndProc = WNDPROC(wndproc)
+wc.lpszClassName = "AgentTipsHotkeyProbe"
+wc.hInstance = ctypes.windll.kernel32.GetModuleHandleW(None)
+u.RegisterClassW(ctypes.byref(wc))
+hwnd = u.CreateWindowExW(0, "AgentTipsHotkeyProbe", "probe", 0, 0, 0, 0, 0, None, None, wc.hInstance, None)
+candidates = [0x79, 0x7A, 0x7B, 0x78, 0x77]  # F10, F11, F12, F9, F8
+reg = None
+for vk in candidates:
+    ctypes.set_last_error(0)
+    if u.RegisterHotKey(hwnd, 1, MOD_CONTROL, vk):
+        reg = vk
+        break
+    if ctypes.get_last_error() != ERROR_HOTKEY_ALREADY_REGISTERED:
+        break
+if reg is None:
+    print("NO_SLOT")
+else:
+    class KBD(ctypes.Structure):
+        _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort), ("dwFlags", ctypes.c_ulong),
+                    ("time", ctypes.c_ulong), ("dwExtraInfo", ctypes.c_void_p)]
+    class INP(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_ulong), ("ki", KBD)]
+    def send(vk, down):
+        inp = INP(); inp.type = 1
+        inp.ki.wVk = vk; inp.ki.wScan = 0
+        inp.ki.dwFlags = 0 if down else 2
+        u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INP))
+    send(0x11, 1)
+    send(reg, 1)
+    send(reg, 0)
+    send(0x11, 0)
+    deadline = time.time() + 1.5
+    msg = w.MSG()
+    while time.time() < deadline:
+        while u.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
+            u.TranslateMessage(ctypes.byref(msg))
+            u.DispatchMessageW(ctypes.byref(msg))
+        time.sleep(0.01)
+    print("DELIVERED" if received else "NOT_DELIVERED")
+    u.UnregisterHotKey(hwnd, 1)
+`;
+  const result = spawnSync("python", ["-X", "utf8", "-c", code], {
+    encoding: "utf8",
+    timeout: 25_000,
+  });
+  if (result.status !== 0) {
+    return {
+      available: false,
+      reason: `probe python failed: ${(result.stderr ?? "").trim() || "unknown"}`,
+    };
+  }
+  const out = (result.stdout ?? "").trim();
+  if (out === "DELIVERED") {
+    return { available: true, reason: "synthetic hotkey delivered" };
+  }
+  if (out === "NOT_DELIVERED") {
+    return {
+      available: false,
+      reason: "synthetic hotkey NOT delivered (session filters injected input)",
+    };
+  }
+  if (out === "NO_SLOT") {
+    return { available: false, reason: "no free probe hotkey slot" };
+  }
+  return { available: false, reason: `unexpected probe output: ${out}` };
+}
+
+/**
  * 将指定窗口移动到"鼠标当前不在的那块屏"（避免测试窗口打扰用户正在看的屏幕）。
  * 通过标题列表或类名匹配顶层窗口，MoveWindow 到目标屏居中（保持原尺寸）。
  * 只有一块屏时静默返回 0（不移动）。

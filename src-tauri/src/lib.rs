@@ -18,13 +18,16 @@ use adapters::clock::SystemClock;
 use adapters::id::UuidGenerator;
 use adapters::sqlite::SqliteDatabase;
 use adapters::sqlite_hotkey_settings::SqliteHotkeySettingsRepository;
+use adapters::sqlite_reminder::{SqliteReminderEligibility, SqliteReminderStateRepository};
 use adapters::tauri_global_shortcut::TauriGlobalShortcutAdapter;
+use adapters::tauri_reminder_presenter::TauriReminderPresenter;
 use adapters::tauri_window_manager::TauriWindowManager;
 use adapters::windows_foreground::WindowsForegroundContextProvider;
 use adapters::windows_process_tree::WindowsProcessTreeProvider;
 use application::agents::AgentService;
 use application::detection::{DesktopAgentDetector, ForegroundWatcher};
 use application::hotkey::HotkeyRuntime;
+use application::reminder::{ReminderCoordinator, ReminderCoordinatorPort};
 use application::terminal::{
     TerminalAgentDetector, TerminalHostClassifier, WindowsTerminalContextProvider,
 };
@@ -34,6 +37,9 @@ use commands::agents::agent_list;
 use commands::detection::desktop_detection_get_current;
 use commands::hotkey::{
     hotkey_get, hotkey_preview, hotkey_recording_begin, hotkey_recording_end, hotkey_update,
+};
+use commands::reminder::{
+    reminder_dismiss, reminder_get_current_payload, reminder_settings_get, reminder_settings_update,
 };
 use commands::tips::{
     note_color_suggest, tip_create, tip_delete, tip_get, tip_list, tip_mark_used, tip_restore_used,
@@ -50,6 +56,7 @@ pub struct AppState {
     pub tips: TipService,
     pub agents: AgentService,
     pub windows: WindowApplicationService,
+    pub reminder: Arc<ReminderCoordinator>,
     pub is_quitting: Arc<AtomicBool>,
 }
 
@@ -121,6 +128,21 @@ pub fn run() {
             let window_manager = Arc::new(TauriWindowManager::new(app_handle.clone()));
             let windows = WindowApplicationService::new(window_manager.clone());
             let is_quitting = Arc::new(AtomicBool::new(false));
+
+            // Reminder Runtime：Default Carry 查询 + per-agent cooldown 持久化 + 非激活展示。
+            let reminder_eligibility: Arc<dyn ports::reminder::ReminderEligibilityPort> =
+                Arc::new(SqliteReminderEligibility::new(db.clone()));
+            let reminder_state: Arc<dyn ports::reminder::ReminderStateRepositoryPort> =
+                Arc::new(SqliteReminderStateRepository::new(db.clone()));
+            let reminder_presenter: Arc<dyn ports::reminder::ReminderPresenterPort> = Arc::new(
+                TauriReminderPresenter::new(app_handle.clone(), window_manager.clone()),
+            );
+            let reminder = Arc::new(ReminderCoordinator::new(
+                reminder_eligibility,
+                reminder_state,
+                reminder_presenter,
+                clock.clone(),
+            ));
 
             // Global Hotkey Runtime：启动注册失败不阻塞应用（Main/Tray/Settings 继续可用）
             let hotkey_repo = Arc::new(SqliteHotkeySettingsRepository::new(db.clone()));
@@ -195,6 +217,7 @@ pub fn run() {
                 detector,
                 terminal_context,
                 terminal_detector,
+                Some(reminder.clone() as Arc<dyn ReminderCoordinatorPort>),
                 clock.clone(),
             ));
             watcher.start()?;
@@ -203,6 +226,7 @@ pub fn run() {
                 tips,
                 agents,
                 windows,
+                reminder,
                 is_quitting: is_quitting.clone(),
             });
             app.manage(hotkey);
@@ -285,7 +309,11 @@ pub fn run() {
             window_open_settings,
             window_hide_current,
             window_get_kind,
-            window_quit
+            window_quit,
+            reminder_settings_get,
+            reminder_settings_update,
+            reminder_dismiss,
+            reminder_get_current_payload
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

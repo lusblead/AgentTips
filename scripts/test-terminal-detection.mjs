@@ -20,6 +20,7 @@ import {
   makeLogDir,
   makeTestDataDir,
   moveWindowsToNativeDisplay,
+  probeSyntheticHotkey,
   sleep,
   waitFor,
 } from "./lib/runtime-test-utils.mjs";
@@ -248,6 +249,9 @@ function closeAllClients() {
 async function run() {
   let fixture = null;
   try {
+    const probe = probeSyntheticHotkey();
+    const hotkeyUsable = probe.available;
+    console.log(`hotkey probe: available=${hotkeyUsable} (${probe.reason})`);
     startApp();
     const main = await ensureClient("main");
     moveWindowsToNativeDisplay({ titles: ["AgentTips", "新建提示", "设置"] });
@@ -294,7 +298,16 @@ async function run() {
     console.log(`E. 多 Tab → status=${statusMulti.status} terminalStatus=${statusMulti.terminalStatus}  PASS`);
 
     // F. Hotkey 打开 Quick Note → SelfWindow
-    sendHotkey(0x7b);
+    if (hotkeyUsable) {
+      sendHotkey(0x7b);
+    } else {
+      await main.evaluate(
+        `window.__TAURI_INTERNALS__.invoke('window_open_quick_note')`,
+      );
+      console.log(
+        `  (synthetic hotkey unavailable → window_open_quick_note fallback, reason=${probe.reason})`,
+      );
+    }
     const quick = await ensureClient("quick-note");
     await waitFor(async () => isVisible(quick), { timeout: 15_000, label: "quick-note visible" });
     moveWindowsToNativeDisplay({ titles: ["AgentTips", "新建提示", "设置"] });

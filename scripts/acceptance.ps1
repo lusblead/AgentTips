@@ -50,7 +50,8 @@ $steps = @(
     @{ Name = "pnpm test:windows-runtime (real multi-window lifecycle)"; Command = "pnpm test:windows-runtime" },
     @{ Name = "pnpm test:global-hotkey (real global hotkey runtime)"; Command = "pnpm test:global-hotkey" },
     @{ Name = "pnpm test:desktop-detection (real foreground detection)"; Command = "pnpm test:desktop-detection" },
-    @{ Name = "pnpm test:terminal-detection (real terminal session detection)"; Command = "pnpm test:terminal-detection" }
+    @{ Name = "pnpm test:terminal-detection (real terminal session detection)"; Command = "pnpm test:terminal-detection" },
+    @{ Name = "pnpm test:reminder-runtime (real default-carry reminder)"; Command = "pnpm test:reminder-runtime" }
 )
 
 $failed = @()

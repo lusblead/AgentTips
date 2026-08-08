@@ -2,60 +2,212 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ============ Design System Tokens ============
+ * 语义分层：Canvas / Surface / Text / Border / Accent / Danger
+ * Radius / Shadow / Typography / Motion
+ */
 :root {
-  --background: oklch(0.985 0.002 250);
-  --foreground: oklch(0.23 0.012 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.23 0.012 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.23 0.012 260);
-  --primary: oklch(0.45 0.11 255);
-  --primary-foreground: oklch(0.98 0.002 250);
-  --secondary: oklch(0.94 0.008 255);
-  --secondary-foreground: oklch(0.32 0.02 260);
-  --muted: oklch(0.94 0.008 255);
-  --muted-foreground: oklch(0.5 0.02 260);
-  --accent: oklch(0.92 0.015 255);
-  --accent-foreground: oklch(0.3 0.03 260);
-  --destructive: oklch(0.6 0.2 25);
-  --destructive-foreground: oklch(0.98 0.002 250);
+  /* Canvas */
+  --surface-canvas: #f5f7fa;
+  --surface-primary: oklch(0.985 0.002 250);
+  --surface-secondary: oklch(0.955 0.004 250);
+  --surface-hover: oklch(0.94 0.006 250);
+  --surface-selected: oklch(0.922 0.018 255);
+
+  /* Text */
+  --text-primary: oklch(0.24 0.014 260);
+  --text-secondary: oklch(0.42 0.018 260);
+  --text-muted: oklch(0.56 0.02 260);
+  --text-disabled: oklch(0.68 0.016 260);
+
+  /* Border */
+  --border-subtle: oklch(0.92 0.005 250);
+  --border-default: oklch(0.885 0.008 250);
+  --border-strong: oklch(0.8 0.012 250);
+
+  /* Accent */
+  --accent: oklch(0.52 0.12 255);
+  --accent-hover: oklch(0.47 0.115 255);
+  --accent-subtle: oklch(0.945 0.02 255);
+  --accent-ring: oklch(0.68 0.1 255 / 0.28);
+
+  /* Danger */
+  --danger: oklch(0.58 0.19 25);
+  --danger-subtle: oklch(0.95 0.028 25);
+
+  /* Pastel Palette（低饱和、可读、light 明显但柔和） */
+  /* Note Palette（LIGHT，正式 10 色） */
+  --note-lemon: #fff0a6;
+  --note-apricot: #ffd7b5;
+  --note-coral: #ffc7c2;
+  --note-rose: #f7c6dc;
+  --note-lavender: #decdfb;
+  --note-periwinkle: #c9d6ff;
+  --note-sky: #bfe4ff;
+  --note-aqua: #bdede7;
+  --note-mint: #c7efd4;
+  --note-sage: #ddeab5;
+  --note-text-primary: #243044;
+  --note-text-secondary: #5f6c80;
+  --note-border: rgba(36, 48, 68, 0.06);
+  --note-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+  --note-shadow-hover: 0 10px 28px rgba(15, 23, 42, 0.1);
+  --note-radius: 14px;
+
+  /* Legacy aliases (kept for existing ui components) */
+  --background: var(--surface-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--surface-primary);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-primary);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--accent);
+  --primary-foreground: oklch(0.985 0.002 250);
+  --secondary: var(--surface-secondary);
+  --secondary-foreground: var(--text-secondary);
+  --muted: var(--surface-secondary);
+  --muted-foreground: var(--text-muted);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--danger);
+  --destructive-foreground: oklch(0.985 0.002 250);
   --warning: oklch(0.7 0.16 75);
   --warning-foreground: oklch(0.25 0.04 60);
-  --success: oklch(0.62 0.15 155);
-  --success-foreground: oklch(0.98 0.002 250);
-  --border: oklch(0.9 0.006 255);
-  --input: oklch(0.9 0.006 255);
-  --ring: oklch(0.62 0.13 255);
-  --radius: 0.5rem;
+  --success: oklch(0.58 0.14 155);
+  --success-foreground: oklch(0.985 0.002 250);
+  --border: var(--border-default);
+  --input: var(--border-default);
+  --ring: var(--accent);
+
+  --radius-sm: 7px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-window: 12px;
+  --radius: var(--radius-md);
+
+  /* Shadows */
+  --shadow-floating: 0 2px 8px oklch(0.2 0.02 260 / 0.08), 0 8px 24px oklch(0.2 0.02 260 / 0.06);
+  --shadow-popover: 0 4px 12px oklch(0.2 0.02 260 / 0.1), 0 12px 32px oklch(0.2 0.02 260 / 0.08);
+
+  /* Typography */
+  --font-body:
+    "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --text-page-title: 1.0625rem;
+  --text-section: 0.875rem;
+  --text-body: 0.875rem;
+  --text-secondary-size: 0.8125rem;
+  --text-caption: 0.75rem;
+
+  /* Motion */
+  --duration-fast: 150ms;
 }
 
 .dark {
-  --background: oklch(0.17 0.012 260);
-  --foreground: oklch(0.93 0.006 250);
-  --card: oklch(0.21 0.014 260);
-  --card-foreground: oklch(0.93 0.006 250);
-  --popover: oklch(0.21 0.014 260);
-  --popover-foreground: oklch(0.93 0.006 250);
-  --primary: oklch(0.66 0.12 255);
+  --surface-canvas: oklch(0.16 0.012 260);
+  --surface-primary: oklch(0.195 0.013 260);
+  --surface-secondary: oklch(0.225 0.014 260);
+  --surface-hover: oklch(0.26 0.016 260);
+  --surface-selected: oklch(0.27 0.03 260);
+
+  --text-primary: oklch(0.93 0.006 250);
+  --text-secondary: oklch(0.76 0.014 250);
+  --text-muted: oklch(0.62 0.018 250);
+  --text-disabled: oklch(0.5 0.016 250);
+
+  --border-subtle: oklch(0.27 0.012 260);
+  --border-default: oklch(0.31 0.014 260);
+  --border-strong: oklch(0.4 0.016 260);
+
+  --accent: oklch(0.68 0.12 255);
+  --accent-hover: oklch(0.72 0.12 255);
+  --accent-subtle: oklch(0.25 0.035 260);
+  --accent-ring: oklch(0.68 0.12 255 / 0.25);
+
+  --danger: oklch(0.68 0.18 25);
+  --danger-subtle: oklch(0.26 0.045 25);
+
+  /* Dark 模式：对应深色 surface 映射，保持可读与克制 */
+  /* Note Palette（DARK，固定映射） */
+  --note-lemon: #4a401f;
+  --note-apricot: #493425;
+  --note-coral: #482f30;
+  --note-rose: #452d39;
+  --note-lavender: #372e4d;
+  --note-periwinkle: #2b3654;
+  --note-sky: #254052;
+  --note-aqua: #214541;
+  --note-mint: #264334;
+  --note-sage: #394329;
+  --note-text-primary: #f5f7fa;
+  --note-text-secondary: #c6ceda;
+  --note-border: rgba(245, 247, 250, 0.08);
+  --note-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  --note-shadow-hover: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --note-radius: 14px;
+
+  --background: var(--surface-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--surface-primary);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-primary);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--accent);
   --primary-foreground: oklch(0.15 0.01 260);
-  --secondary: oklch(0.26 0.015 260);
-  --secondary-foreground: oklch(0.9 0.006 250);
-  --muted: oklch(0.26 0.015 260);
-  --muted-foreground: oklch(0.68 0.02 260);
-  --accent: oklch(0.28 0.02 260);
-  --accent-foreground: oklch(0.93 0.006 250);
-  --destructive: oklch(0.68 0.18 25);
-  --destructive-foreground: oklch(0.98 0.002 250);
+  --secondary: var(--surface-secondary);
+  --secondary-foreground: var(--text-secondary);
+  --muted: var(--surface-secondary);
+  --muted-foreground: var(--text-muted);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--danger);
+  --destructive-foreground: oklch(0.985 0.002 250);
   --warning: oklch(0.78 0.14 75);
   --warning-foreground: oklch(0.2 0.03 60);
   --success: oklch(0.7 0.14 155);
   --success-foreground: oklch(0.15 0.01 260);
-  --border: oklch(0.3 0.014 260);
-  --input: oklch(0.3 0.014 260);
-  --ring: oklch(0.62 0.13 255);
+  --border: var(--border-default);
+  --input: var(--border-default);
+  --ring: var(--accent);
+
+  --shadow-floating: 0 2px 8px oklch(0 0 0 / 0.35), 0 10px 28px oklch(0 0 0 / 0.3);
+  --shadow-popover: 0 4px 12px oklch(0 0 0 / 0.4), 0 14px 36px oklch(0 0 0 / 0.35);
 }
 
 @theme inline {
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-primary: var(--surface-primary);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-disabled: var(--text-disabled);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-ring: var(--accent-ring);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-note-lemon: var(--note-lemon);
+  --color-note-apricot: var(--note-apricot);
+  --color-note-coral: var(--note-coral);
+  --color-note-rose: var(--note-rose);
+  --color-note-lavender: var(--note-lavender);
+  --color-note-periwinkle: var(--note-periwinkle);
+  --color-note-sky: var(--note-sky);
+  --color-note-aqua: var(--note-aqua);
+  --color-note-mint: var(--note-mint);
+  --color-note-sage: var(--note-sage);
+  --color-note-text-primary: var(--note-text-primary);
+  --color-note-text-secondary: var(--note-text-secondary);
+  --color-note-border: var(--note-border);
+  --color-note-shadow: var(--note-shadow);
+  --color-note-shadow-hover: var(--note-shadow-hover);
+  --radius-note: var(--note-radius);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -68,7 +220,6 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
@@ -79,17 +230,24 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* 圆角 token：按钮 7px，卡片 8px，窗口 12px */
-  --radius-sm: 7px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 12px;
-  /* 字号 token：正文 14px，辅助 13px，标题 17px */
-  --text-tip: 0.875rem;
-  --text-aux: 0.8125rem;
-  --text-heading: 1.0625rem;
-  /* 动效 token：常规 150ms（120-180ms 区间） */
-  --duration-fast: 150ms;
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-window: var(--radius-window);
+
+  --shadow-floating: var(--shadow-floating);
+  --shadow-popover: var(--shadow-popover);
+
+  --font-sans: var(--font-body);
+  --text-page-title: var(--text-page-title);
+  --text-section: var(--text-section);
+  --text-body: var(--text-body);
+  --text-secondary-size: var(--text-secondary-size);
+  --text-caption: var(--text-caption);
+  --text-tip: var(--text-body);
+  --text-aux: var(--text-secondary-size);
+  --text-heading: var(--text-page-title);
 }
 
 @layer base {
@@ -97,16 +255,11 @@
     border-color: var(--border);
   }
   body {
-    background-color: var(--background);
-    color: var(--foreground);
-    font-size: var(--text-tip);
-    font-family:
-      system-ui,
-      -apple-system,
-      "Segoe UI",
-      "Microsoft YaHei",
-      "PingFang SC",
-      sans-serif;
+    background-color: var(--surface-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: var(--text-body);
+    -webkit-font-smoothing: antialiased;
   }
   code,
   pre {
@@ -127,6 +280,13 @@
 
 .animate-window-in {
   animation: window-fade-in var(--duration-fast) ease-out;
+}
+
+/* 统一焦点样式：subtle border + soft accent ring */
+.focus-ring {
+  outline: none;
+  border-color: var(--accent-ring);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 @media (prefers-reduced-motion: reduce) {

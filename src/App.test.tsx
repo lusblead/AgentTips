@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import App from "./App";
 
 function visit(path: string) {
@@ -9,8 +9,8 @@ describe("窗口路由", () => {
   it("默认进入主管理窗口", async () => {
     visit("/");
     render(<App />);
-    expect(await screen.findByText("提示库")).toBeInTheDocument();
-    expect(screen.getByText("修改前解释调用链")).toBeInTheDocument();
+    expect(await screen.findByText("AgentTips")).toBeInTheDocument();
+    expect(await screen.findAllByTestId("tip-card")).not.toHaveLength(0);
   });
 
   it("?window=quick-note 进入快捷新建窗口", () => {
@@ -21,7 +21,7 @@ describe("窗口路由", () => {
   });
 
   it("?window=reminder 进入提醒窗口", async () => {
-    visit("/?window=reminder");
+    visit("/?window=reminder&demo=expanded");
     render(<App />);
     expect(await screen.findByRole("dialog", { name: "Cursor 提醒" })).toBeInTheDocument();
     expect(screen.getByText("3 条提示")).toBeInTheDocument();
@@ -32,30 +32,57 @@ describe("窗口路由", () => {
     render(<App />);
     expect(await screen.findByText("设置")).toBeInTheDocument();
   });
+
+  it("popstate 事件可切换窗口", async () => {
+    visit("/?window=main");
+    const { unmount } = render(<App />);
+    await screen.findByText("AgentTips");
+    window.history.pushState({}, "", "/?window=quick-note");
+    const { getBrowserWindowContext } = await import("@/desktop-api");
+    expect(getBrowserWindowContext().kind).toBe("quick-note");
+    act(() => {
+      window.dispatchEvent(new Event("agenttips:route"));
+    });
+    expect(await screen.findByText("新建提示")).toBeInTheDocument();
+    expect(screen.getByLabelText("正文")).toBeInTheDocument();
+    unmount();
+  });
 });
 
 describe("UI 开发文字清理", () => {
-  const forbidden = ["Phase 1", "Phase 6", "仅前端", "尚未注册", "New Tip", "3 Tips"];
+  const forbidden = [
+    "Phase 1",
+    "Phase 6",
+    "仅前端",
+    "尚未注册",
+    "New Tip",
+    "3 Tips",
+    "尚未实现",
+    "后续阶段接入",
+    "开发阶段",
+  ];
 
-  it.each(["/?window=main", "/?window=quick-note", "/?window=reminder", "/?window=settings"])(
-    "%s 不含开发阶段文字",
-    async (path) => {
-      visit(path);
-      const { unmount } = render(<App />);
-      if (path === "/?window=main") {
-        await screen.findByText("提示库");
-      } else if (path === "/?window=quick-note") {
-        await screen.findByText("新建提示");
-      } else if (path === "/?window=settings") {
-        await screen.findByText("设置");
-      } else {
-        await screen.findByText("3 条提示");
-      }
-      const bodyText = document.body.textContent ?? "";
-      for (const text of forbidden) {
-        expect(bodyText).not.toContain(text);
-      }
-      unmount();
-    },
-  );
+  it.each([
+    "/?window=main",
+    "/?window=quick-note",
+    "/?window=reminder&demo=expanded",
+    "/?window=settings",
+  ])("%s 不含开发阶段文字", async (path) => {
+    visit(path);
+    const { unmount } = render(<App />);
+    if (path === "/?window=main") {
+      await screen.findByText("AgentTips");
+    } else if (path === "/?window=quick-note") {
+      await screen.findByText("新建提示");
+    } else if (path === "/?window=settings") {
+      await screen.findByText("设置");
+    } else {
+      await screen.findByText("3 条提示");
+    }
+    const bodyText = document.body.textContent ?? "";
+    for (const text of forbidden) {
+      expect(bodyText).not.toContain(text);
+    }
+    unmount();
+  });
 });

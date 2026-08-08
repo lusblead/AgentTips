@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HotkeyRecorder } from ".";
+import { vi } from "vitest";
+import HotkeySettingsWindow, { HotkeyRecorder } from ".";
 import { MockDesktopApi } from "@/desktop-api";
 import type { HotkeyBinding } from "@/desktop-api/contract";
 
@@ -28,7 +29,7 @@ describe("快捷键录制控件", () => {
     const { user } = await renderRecorder();
     await startRecording(user);
     await user.keyboard("{Control>}k{/Control}");
-    expect(await screen.findByText("已保存 Ctrl + K")).toBeInTheDocument();
+    expect(await screen.findByText("已更新 Ctrl + K")).toBeInTheDocument();
     expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + K");
   });
 
@@ -75,22 +76,75 @@ describe("快捷键录制控件", () => {
     expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
   });
 
-  it("常见冲突组合显示针对性警告并保留旧值", async () => {
+  it("常见冲突组合显示确认对话框，取消后保留旧值", async () => {
     const { user } = await renderRecorder();
     await startRecording(user);
     await user.keyboard("{Control>}c{/Control}");
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("该组合可能覆盖系统常用操作");
-    expect(alert).toHaveTextContent("当前快捷键仍为 Ctrl + F12");
+    const dialog = await screen.findByRole("dialog", { name: "高冲突快捷键确认" });
+    expect(dialog).toHaveTextContent("设为全局快捷键可能影响其他软件");
     expect(screen.getByText("检测到 Ctrl + C")).toBeInTheDocument();
+    expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
   });
 
-  it("Ctrl + Z 冲突时保留旧值", async () => {
+  it("Ctrl + C 确认后执行更新", async () => {
+    const { api, user } = await renderRecorder();
+    const updateSpy = vi.spyOn(api, "updateHotkey");
+    await startRecording(user);
+    await user.keyboard("{Control>}c{/Control}");
+    await screen.findByRole("dialog", { name: "高冲突快捷键确认" });
+    await user.click(screen.getByRole("button", { name: "仍然使用" }));
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("已更新 Ctrl + C")).toBeInTheDocument();
+    expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + C");
+  });
+
+  it("Ctrl + Z 冲突时不直接更新", async () => {
     const { user } = await renderRecorder();
     await startRecording(user);
     await user.keyboard("{Control>}z{/Control}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("该组合可能覆盖系统常用操作");
+    expect(await screen.findByRole("dialog", { name: "高冲突快捷键确认" })).toBeInTheDocument();
     expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
+  });
+
+  it("注册失败时保留旧值并显示错误", async () => {
+    const { api, user } = await renderRecorder();
+    api.setMockFailure("hotkey", true);
+    await startRecording(user);
+    await user.keyboard("{Control>}k{/Control}");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("无法注册");
+    expect(alert).toHaveTextContent("当前快捷键仍为 Ctrl + F12");
+    expect(screen.getByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
+  });
+
+  it("录制开始与结束调用 begin/endHotkeyRecording", async () => {
+    const { api, user } = await renderRecorder();
+    await startRecording(user);
+    expect(api.hotkeyCalls).toContain("begin");
+    await user.keyboard("{Escape}");
+    expect(api.hotkeyCalls).toContain("end");
+  });
+
+  it("Settings 打开时从持久化状态读取快捷键", async () => {
+    const api = new MockDesktopApi();
+    const view = render(<HotkeySettingsWindow api={api} />);
+    expect(await screen.findByTestId("hotkey-display")).toHaveTextContent("Ctrl + F12");
+    view.unmount();
+  });
+
+  it("Settings 重新打开后显示已持久化的值", async () => {
+    const api = new MockDesktopApi();
+    const first = render(<HotkeySettingsWindow api={api} />);
+    await screen.findByTestId("hotkey-display");
+    first.unmount();
+
+    // 另一处（Quick Note 等）直接改设置，模拟真实持久化语义
+    await api.updateHotkey({ modifier: "Ctrl", keyCode: "F11" });
+    const second = render(<HotkeySettingsWindow api={api} />);
+    expect(await screen.findByTestId("hotkey-display")).toHaveTextContent("Ctrl + F11");
+    second.unmount();
   });
 });

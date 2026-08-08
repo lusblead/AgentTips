@@ -7,8 +7,9 @@
 ```text
 Tip
 - id: UUID
-- title: string?
+- title: string?  # 新便签保持 NULL；仅兼容旧数据
 - content: string
+- tags: string[]
 - status: draft | active | archived
 - created_at
 - updated_at
@@ -18,6 +19,8 @@ Tip
 不变量：
 
 - `active` Tip 的正文不能为空；
+- 新 Tip 不从正文派生标题；标题为空是正常状态；
+- 标签由用户自由输入，去除前导 `#` 和多余空白后按大小写不敏感去重；每条最多 8 个、每个最多 32 个字符；
 - `draft` 可暂时没有 Agent 绑定；
 - `archived` 不参与自动提醒；
 - 软删除记录不出现在正常查询中。
@@ -56,6 +59,25 @@ TipAgentBinding
 - `(tip_id, agent_id)` 唯一；
 - 默认携带属于绑定关系；
 - 删除 Agent 或 Tip 时通过事务处理关联记录。
+
+### Tag / TipTag
+
+```text
+Tag
+- id: UUID
+- name: string
+- normalized_name: string unique
+- created_at
+- updated_at
+
+TipTag
+- tip_id
+- tag_id
+- sort_order: integer
+- created_at
+```
+
+标签不是预设枚举。用户可以输入新标签，也可以复用历史标签；`normalized_name` 只用于大小写不敏感去重，界面展示首次保存的 `name`。`(tip_id, tag_id)` 唯一，排序按用户添加顺序稳定保存。
 
 ### AgentRule
 
@@ -126,6 +148,26 @@ CREATE TABLE tips (
 
 CREATE INDEX idx_tips_updated_at ON tips(updated_at DESC);
 CREATE INDEX idx_tips_status ON tips(status);
+
+CREATE TABLE tags (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE tip_tags (
+    tip_id TEXT NOT NULL,
+    tag_id TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tip_id, tag_id),
+    FOREIGN KEY (tip_id) REFERENCES tips(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_tip_tags_tag ON tip_tags(tag_id, tip_id);
 
 CREATE TABLE agents (
     id TEXT PRIMARY KEY,
@@ -241,14 +283,18 @@ PRAGMA foreign_keys = ON;
 
 ### 搜索
 
-MVP 使用 SQLite `LIKE` 搜索标题和正文即可，不增加 FTS 或向量索引。数据量增长后再评估 FTS5。
+MVP 使用 SQLite `LIKE` 搜索兼容旧标题、正文和标签即可，不增加 FTS 或向量索引。数据量增长后再评估 FTS5。
+
+### 历史标签建议
+
+只返回标签名，不加载历史便签正文；按最近复用时间倒序并设置受控上限。建议查询失败时，快捷窗口仍允许输入新标签。
 
 ## 6. 事务边界
 
 以下操作必须为事务：
 
-- 创建 Tip + 创建多个绑定；
-- 更新 Tip + 全量同步绑定；
+- 创建 Tip + 创建或复用标签 + 创建 TipTag + 创建多个绑定；
+- 更新 Tip + 全量同步标签与绑定；
 - 删除 Agent + 清理规则与状态；
 - 归档 Tip；
 - 提醒显示成功后更新激活状态；

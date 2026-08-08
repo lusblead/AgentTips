@@ -7,7 +7,7 @@ const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(E2E_DIR, "..", "artifacts", "screenshots", "phase-1.5");
 const VIEWPORTS = {
   main: { width: 1180, height: 760 },
-  quickNote: { width: 620, height: 420 },
+  quickNote: { width: 440, height: 380 },
   reminder: { width: 420, height: 360 },
   settings: { width: 800, height: 600 },
 };
@@ -29,6 +29,7 @@ async function setup(page: Page, viewport: { width: number; height: number }, ur
 
 test.beforeAll(() => {
   mkdirSync(OUT_DIR, { recursive: true });
+  mkdirSync(join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.2"), { recursive: true });
 });
 
 test.describe("Phase 1.5 视觉截图", () => {
@@ -44,6 +45,11 @@ test.describe("Phase 1.5 视觉截图", () => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.quickNote, "/?window=quick-note");
     await page.getByLabel("正文").fill("修改任何核心模块前，先解释调用链与影响范围。");
+    const tagInput = page.getByRole("combobox", { name: "添加标签" });
+    await tagInput.click();
+    await page.getByRole("option", { name: "代码审查" }).click();
+    await tagInput.fill("重要");
+    await tagInput.press("Enter");
     await page.screenshot({ path: join(OUT_DIR, "quick-note-filled.png") });
     expect(errors).toEqual([]);
   });
@@ -52,6 +58,8 @@ test.describe("Phase 1.5 视觉截图", () => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.quickNote, "/?window=quick-note");
     await page.getByLabel("正文").fill("同时提醒多个 Agent 的通用约束。");
+    await page.getByRole("combobox", { name: "添加标签" }).fill("跨 Agent");
+    await page.getByRole("combobox", { name: "添加标签" }).press("Enter");
     await page.getByRole("button", { name: /添加 Agent/ }).click();
     await page.getByRole("menuitem", { name: /Cursor/ }).click();
     await page.getByRole("button", { name: /添加 Agent/ }).click();
@@ -62,11 +70,21 @@ test.describe("Phase 1.5 视觉截图", () => {
     expect(errors).toEqual([]);
   });
 
-  test("主窗口：有数据并选中第一条", async ({ page }) => {
+  test("快捷窗口：放弃未保存内容确认", async ({ page }) => {
+    const errors = trackErrors(page);
+    await setup(page, VIEWPORTS.quickNote, "/?window=quick-note");
+    await page.getByLabel("正文").fill("尚未保存的重要内容");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "放弃这条便签？" })).toBeVisible();
+    await page.screenshot({ path: join(OUT_DIR, "quick-note-discard-confirm.png") });
+    expect(errors).toEqual([]);
+  });
+
+  test("主窗口：有数据（便签墙）", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main");
-    await expect(page.getByText("修改前解释调用链")).toBeVisible();
-    await expect(page.getByLabel("标题")).toHaveValue("修改前解释调用链");
+    await expect(page.getByLabel("标题").first()).toHaveValue("修改前解释调用链");
+    await expect(page.getByTestId("tip-grid")).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "main-window.png") });
     expect(errors).toEqual([]);
   });
@@ -74,23 +92,23 @@ test.describe("Phase 1.5 视觉截图", () => {
   test("主窗口：空态", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main&empty=1");
-    await expect(page.getByText("还没有提示")).toBeVisible();
+    await expect(page.getByText("还没有便签")).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "main-window-empty.png") });
     expect(errors).toEqual([]);
   });
 
-  test("主窗口：选中状态高亮", async ({ page }) => {
+  test("主窗口：hover 便签卡", async ({ page }) => {
     const errors = trackErrors(page);
     await setup(page, VIEWPORTS.main, "/?window=main");
-    const card = page.getByRole("button", { name: /修改前解释调用链/ }).first();
-    await expect(card).toHaveAttribute("aria-pressed", "true");
+    const card = page.getByTestId("tip-card").first();
+    await card.hover();
     await page.screenshot({ path: join(OUT_DIR, "main-window-selected.png") });
     expect(errors).toEqual([]);
   });
 
   test("提醒窗口：展开", async ({ page }) => {
     const errors = trackErrors(page);
-    await setup(page, VIEWPORTS.reminder, "/?window=reminder");
+    await setup(page, VIEWPORTS.reminder, "/?window=reminder&demo=expanded");
     await expect(page.getByRole("dialog", { name: "Cursor 提醒" })).toBeVisible();
     await page.screenshot({ path: join(OUT_DIR, "reminder-expanded.png") });
     expect(errors).toEqual([]);
@@ -129,6 +147,65 @@ test.describe("Phase 1.5 视觉截图", () => {
     await expect(page.getByText("检测到 Ctrl + Alt + K")).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("当前快捷键仍为 Ctrl + F12");
     await page.screenshot({ path: join(OUT_DIR, "settings-hotkey-invalid.png") });
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("Phase 2.2 补充截图（浏览器 Mock）", () => {
+  const PHASE22 = join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.2");
+
+  test("提醒窗口：展开", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.setViewportSize({ width: 420, height: 360 });
+    await page.goto("/?window=reminder&demo=expanded");
+    await expect(page.getByRole("dialog", { name: "Cursor 提醒" })).toBeVisible();
+    await page.screenshot({ path: join(PHASE22, "reminder-expanded.png") });
+    expect(errors).toEqual([]);
+  });
+
+  test("提醒窗口：胶囊", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.setViewportSize({ width: 420, height: 360 });
+    await page.goto("/?window=reminder&demo=collapsed");
+    await expect(page.getByText("Cursor · 3 条提示")).toBeVisible();
+    await page.screenshot({ path: join(PHASE22, "reminder-collapsed.png") });
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("Phase 2.4 补充截图（浏览器 Mock）", () => {
+  test("已使用便签空态", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.setViewportSize({ width: 1000, height: 750 });
+    await page.goto("/?window=main");
+    await expect(page.getByTestId("tip-card").first()).toBeVisible();
+    await page.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: "已使用便签" }).click();
+    await expect(page.getByRole("heading", { name: "已使用" })).toBeVisible();
+    const usedCard = page.getByTestId("tip-card").first();
+    await expect(usedCard).toBeVisible();
+    await usedCard.getByRole("button", { name: "恢复到首页" }).click();
+    // 恢复后自动回首页；重新进入 Used View 截空态
+    await expect(page.getByRole("heading", { name: "AgentTips" })).toBeVisible();
+    await page.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: "已使用便签" }).click();
+    await expect(page.getByRole("heading", { name: "已使用" })).toBeVisible();
+    await expect(page.getByText("还没有已使用的便签")).toBeVisible();
+    await page.screenshot({
+      path: join(E2E_DIR, "..", "artifacts", "screenshots", "phase-2.4R", "used-notes-empty.png"),
+    });
     expect(errors).toEqual([]);
   });
 });

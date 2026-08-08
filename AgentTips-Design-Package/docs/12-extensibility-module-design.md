@@ -13,7 +13,7 @@
 
 ## 2. 模块原则
 
-1. **按业务能力切分：** tips、agents、hotkey、detection、activation、reminder、settings。
+1. **按业务能力切分：** tips（含用户标签）、agents、hotkey、detection、activation、reminder、settings。
 2. **依赖倒置：** application 依赖 port，外部适配器实现 port。
 3. **领域纯净：** domain 不导入框架与 I/O。
 4. **单一写入者：** 每类状态由一个模块负责，例如冷却只由 reminder/activation 更新。

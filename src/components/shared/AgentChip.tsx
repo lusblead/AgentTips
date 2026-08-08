@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Monitor, Terminal, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { AgentKind } from "@/desktop-api/contract";
 
@@ -16,9 +16,11 @@ export function AgentChip({ name, kind, onRemove, muted }: AgentChipProps) {
       className={muted ? "opacity-70" : ""}
       title={kind === "terminal" ? "终端 Agent" : "桌面 Agent"}
     >
-      <span aria-hidden className="text-muted-foreground">
-        {kind === "terminal" ? "⌘" : "▣"}
-      </span>
+      {kind === "terminal" ? (
+        <Terminal className="h-3 w-3 text-text-muted" aria-hidden />
+      ) : (
+        <Monitor className="h-3 w-3 text-text-muted" aria-hidden />
+      )}
       {name}
       {onRemove && (
         <button

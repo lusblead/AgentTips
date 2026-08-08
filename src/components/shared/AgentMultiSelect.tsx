@@ -1,4 +1,5 @@
 import { Check, Plus } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +19,8 @@ export interface AgentMultiSelectProps {
   disabled?: boolean;
   /** 是否在按钮上方展示已选 Agent 标签；绑定行由调用方渲染时可关闭。 */
   showSelected?: boolean;
+  /** 菜单关闭后的回调（用于把焦点还给正文等）。 */
+  onMenuClosed?: () => void;
 }
 
 export function AgentMultiSelect({
@@ -26,8 +29,10 @@ export function AgentMultiSelect({
   onChange,
   disabled,
   showSelected = true,
+  onMenuClosed,
 }: AgentMultiSelectProps) {
   const selected = agents.filter((agent) => selectedIds.includes(agent.id));
+  const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col gap-2">
       {showSelected && selected.length > 0 && (
@@ -44,7 +49,15 @@ export function AgentMultiSelect({
           ))}
         </div>
       )}
-      <DropdownMenu>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) {
+            window.setTimeout(() => onMenuClosed?.(), 0);
+          }
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
@@ -71,13 +84,14 @@ export function AgentMultiSelect({
                       ? selectedIds.filter((id) => id !== agent.id)
                       : [...selectedIds, agent.id],
                   );
+                  setOpen(false);
                 }}
               >
-                <span className={checked ? "text-foreground" : "opacity-0"}>
+                <span className={checked ? "text-text-primary" : "opacity-0"}>
                   <Check className="h-4 w-4" />
                 </span>
                 <span className="flex-1">{agent.name}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-caption text-text-muted">
                   {agent.kind === "terminal" ? "终端" : "桌面"}
                 </span>
               </DropdownMenuItem>

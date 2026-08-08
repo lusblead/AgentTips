@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use rand::seq::SliceRandom;
 use uuid::Uuid;
 
+use crate::domain::color::{NoteColorKey, ALL_NOTE_COLORS};
 use crate::domain::tips::{
-    normalized_title, CreateTipCommand, Tip, TipBinding, TipQuery, UpdateTipCommand,
+    normalize_tags, normalized_title, CreateTipCommand, Tip, TipBinding, TipQuery,
+    UpdateTipCommand, UpdateTipTextCommand,
 };
 use crate::error::{AppError, AppResult};
 use crate::ports::clock::Clock;
@@ -30,6 +33,11 @@ impl TipService {
         command.validate()?;
         let now = self.clock.now_utc();
         let id = self.ids.new_id();
+        // 调用方未提供颜色时，按同一颜色分配规则兜底（排除最近 2 种颜色）。
+        let color_key = match command.color_key {
+            Some(key) => key,
+            None => self.suggest_color()?,
+        };
         let bindings: Vec<TipBinding> = command
             .bindings
             .iter()
@@ -40,17 +48,63 @@ impl TipService {
                 sort_order: index as i64,
             })
             .collect();
+        let tags = normalize_tags(&command.tags)?;
         let tip = Tip {
             id,
-            title: normalized_title(command.title.as_deref(), &command.content),
+            title: normalized_title(command.title.as_deref()),
             content: command.content.trim().to_string(),
+            tags,
             status: command.status,
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            color_key,
+            used_at: None,
             bindings: bindings.clone(),
         };
         self.repo.create_with_bindings(&tip, &bindings)
+    }
+
+    /// 颜色建议：排除最近创建的 2 张 Tip 的颜色后随机选择。
+    pub fn suggest_color(&self) -> AppResult<NoteColorKey> {
+        let recent = self.repo.recent_color_keys(2)?;
+        let excluded: std::collections::HashSet<NoteColorKey> = recent.into_iter().collect();
+        let pool: Vec<NoteColorKey> = ALL_NOTE_COLORS
+            .iter()
+            .copied()
+            .filter(|key| !excluded.contains(key))
+            .collect();
+        let candidates = if pool.is_empty() {
+            ALL_NOTE_COLORS.to_vec()
+        } else {
+            pool
+        };
+        let mut rng = rand::thread_rng();
+        Ok(*candidates.choose(&mut rng).unwrap_or(&NoteColorKey::Lemon))
+    }
+
+    /// Text-only 更新：只允许修改 title/content/updated_at。
+    pub fn update_text(&self, command: UpdateTipTextCommand) -> AppResult<Tip> {
+        command.validate()?;
+        let updated_at = self.clock.now_utc();
+        self.repo.update_text(
+            command.id,
+            normalized_title(Some(command.title.as_str())).as_deref(),
+            command.content.trim(),
+            updated_at,
+        )
+    }
+
+    pub fn mark_used(&self, id: Uuid) -> AppResult<Tip> {
+        self.repo.mark_used(id, self.clock.now_utc())
+    }
+
+    pub fn restore_used(&self, id: Uuid) -> AppResult<Tip> {
+        self.repo.restore_used(id)
+    }
+
+    pub fn update_color(&self, id: Uuid, color_key: NoteColorKey) -> AppResult<Tip> {
+        self.repo.update_color(id, color_key)
     }
 
     pub fn get(&self, id: Uuid) -> AppResult<Option<Tip>> {
@@ -61,6 +115,10 @@ impl TipService {
         self.repo.list(&query)
     }
 
+    pub fn list_tags(&self) -> AppResult<Vec<String>> {
+        self.repo.list_tags(50)
+    }
+
     pub fn update(&self, command: UpdateTipCommand) -> AppResult<Tip> {
         command.validate()?;
         let mut tip = self
@@ -69,13 +127,16 @@ impl TipService {
             .ok_or_else(|| AppError::NotFound(format!("Tip {} 不存在", command.id)))?;
 
         if let Some(title) = command.title {
-            tip.title = normalized_title(title.as_deref(), &tip.content);
+            tip.title = normalized_title(title.as_deref());
         }
         if let Some(content) = &command.content {
             tip.content = content.trim().to_string();
         }
         if let Some(status) = command.status {
             tip.status = status;
+        }
+        if let Some(tags) = command.tags {
+            tip.tags = normalize_tags(&tags)?;
         }
         let bindings: Vec<TipBinding> = match command.bindings {
             Some(inputs) => inputs
@@ -103,6 +164,7 @@ impl TipService {
 mod tests {
     use super::*;
     use crate::domain::agents::AgentKind;
+    use crate::domain::color::NoteColorKey;
     use crate::domain::tips::{CreateBindingInput, TipStatus};
     use chrono::{TimeZone, Utc};
     use std::sync::Mutex;
@@ -159,6 +221,19 @@ mod tests {
             Ok(self.stored())
         }
 
+        fn list_tags(&self, _limit: usize) -> AppResult<Vec<String>> {
+            let stored = self.stored();
+            let mut tags = Vec::new();
+            for tip in stored {
+                for tag in tip.tags {
+                    if !tags.contains(&tag) {
+                        tags.push(tag);
+                    }
+                }
+            }
+            Ok(tags)
+        }
+
         fn delete(&self, id: Uuid) -> AppResult<()> {
             self.calls.lock().unwrap().push("delete".into());
             let mut stored = self.stored.lock().unwrap();
@@ -168,6 +243,32 @@ mod tests {
                 return Err(AppError::NotFound(format!("Tip {} 不存在", id)));
             }
             Ok(())
+        }
+
+        fn recent_color_keys(&self, _limit: usize) -> AppResult<Vec<NoteColorKey>> {
+            Ok(vec![])
+        }
+
+        fn update_text(
+            &self,
+            _id: Uuid,
+            _title: Option<&str>,
+            _content: &str,
+            _updated_at: chrono::DateTime<chrono::Utc>,
+        ) -> AppResult<Tip> {
+            unreachable!()
+        }
+
+        fn mark_used(&self, _id: Uuid, _used_at: chrono::DateTime<chrono::Utc>) -> AppResult<Tip> {
+            unreachable!()
+        }
+
+        fn restore_used(&self, _id: Uuid) -> AppResult<Tip> {
+            unreachable!()
+        }
+
+        fn update_color(&self, _id: Uuid, _color_key: NoteColorKey) -> AppResult<Tip> {
+            unreachable!()
         }
     }
 
@@ -215,7 +316,9 @@ mod tests {
         CreateTipCommand {
             title: Some("标题".into()),
             content: content.into(),
+            tags: vec![],
             status: TipStatus::Active,
+            color_key: Some(NoteColorKey::Mint),
             bindings: vec![CreateBindingInput {
                 agent_id: agent,
                 auto_attach,
@@ -244,6 +347,18 @@ mod tests {
     }
 
     #[test]
+    fn create_keeps_missing_title_empty_and_normalizes_tags() {
+        let repo = Arc::new(FakeTipRepository::default());
+        let tips = service(repo);
+        let mut command = create_command("正文第一行不会成为标题", agent_id(2), true);
+        command.title = None;
+        command.tags = vec![" #Rust ".into(), "rust".into(), "代码   审查".into()];
+        let created = tips.create(command).unwrap();
+        assert_eq!(created.title, None);
+        assert_eq!(created.tags, vec!["Rust", "代码 审查"]);
+    }
+
+    #[test]
     fn repository_error_is_mapped_through() {
         let repo = Arc::new(FakeTipRepository::default());
         *repo.fail_with.lock().unwrap() = Some(AppError::Database("disk full".into()));
@@ -263,6 +378,7 @@ mod tests {
                 id: uuid(9),
                 title: None,
                 content: Some("新内容".into()),
+                tags: None,
                 status: None,
                 bindings: None,
             })
@@ -282,6 +398,7 @@ mod tests {
                 id: created.id,
                 title: Some(Some("新标题".into())),
                 content: Some("  新内容  ".into()),
+                tags: Some(vec![" Rust ".into(), "rust".into()]),
                 status: None,
                 bindings: Some(vec![
                     CreateBindingInput {
@@ -296,6 +413,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(updated.content, "新内容");
+        assert_eq!(updated.tags, vec!["Rust"]);
         assert_eq!(updated.bindings.len(), 2);
         assert_eq!(updated.bindings[0].sort_order, 0);
         assert_eq!(updated.bindings[1].sort_order, 1);

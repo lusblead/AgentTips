@@ -1,37 +1,51 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Archive,
+  ArrowLeft,
+  Info,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
-import { AgentBindingRow } from "@/components/shared/AgentBindingRow";
-import { AgentMultiSelect } from "@/components/shared/AgentMultiSelect";
-import { ConfirmActionDialog } from "@/components/shared/ConfirmActionDialog";
-import { EmptyState } from "@/components/shared/EmptyState";
-import { SearchInput } from "@/components/shared/SearchInput";
 import { TipCard } from "@/components/shared/TipCard";
 import { desktopErrorMessage } from "@/desktop-api/contract";
-import type {
-  Agent,
-  AgentBinding,
-  DesktopApi,
-  TipDetail,
-  TipSummary,
-} from "@/desktop-api/contract";
+import type { Agent, DesktopApi, TipDetail, TipSummary } from "@/desktop-api/contract";
+import { NoteEditorDialog } from "./NoteEditorDialog";
 
 export interface NoteLibraryWindowProps {
   api: DesktopApi;
-  /** 从提醒窗口"查看全部"进入时的初始 Agent 过滤。 */
+  /** 从提醒窗口"查看全部"进入时的初始 Agent 过滤（active chip，可清除）。 */
   initialAgentId?: string;
   onNewTip?: () => void;
   onOpenSettings?: () => void;
 }
 
+interface UndoToast {
+  tipId: string;
+  title: string;
+}
+
 /**
- * 主管理窗口（三栏）：Agent 导航 / 便签列表 + 搜索 / 详情编辑。
- * 唯一允许浏览历史便签的地方。
+ * Home Experience：打开即见"便签墙"（可变高度 Masonry）。
+ * 首页便签支持 WYSIWYG inline editing + 650ms autosave；
+ * Mark Used 后移入「已使用」独立视图，可 Restore 或 Undo。
  */
 export default function NoteLibraryWindow({
   api,
@@ -41,84 +55,34 @@ export default function NoteLibraryWindow({
 }: NoteLibraryWindowProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tips, setTips] = useState<TipSummary[]>([]);
+  const [usedTips, setUsedTips] = useState<TipSummary[]>([]);
+  const [view, setView] = useState<"home" | "used">("home");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(initialAgentId);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const [selectedTipId, setSelectedTipId] = useState<string | null>(null);
-  const selectedTipIdRef = useRef<string | null>(null);
-  const [detail, setDetail] = useState<TipDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-
-  const [editorTitle, setEditorTitle] = useState("");
-  const [editorContent, setEditorContent] = useState("");
-  const [editorBindings, setEditorBindings] = useState<AgentBinding[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(
+    initialAgentId ? [initialAgentId] : [],
+  );
+  const [editingTip, setEditingTip] = useState<TipDetail | null>(null);
+  const [toast, setToast] = useState<UndoToast | null>(null);
+  const [leavingIds, setLeavingIds] = useState<string[]>([]);
 
   const loadTips = useCallback(
-    async (agentId: string | undefined, term: string) => {
-      setLoading(true);
+    async (used: boolean) => {
       setLoadError(null);
       try {
-        const list = await api.listTips({
-          agentId,
-          search: term.trim() || undefined,
-        });
-        setTips(list);
-        return list;
+        const list = await api.listTips(used ? { used: true } : {});
+        if (used) setUsedTips(list);
+        else setTips(list);
       } catch (err) {
         setLoadError(desktopErrorMessage(err));
-        return [];
-      } finally {
-        setLoading(false);
       }
     },
     [api],
-  );
-
-  const openTip = useCallback(
-    async (id: string) => {
-      selectedTipIdRef.current = id;
-      setSelectedTipId(id);
-      setDetail(null);
-      setDetailError(null);
-      try {
-        const tip = await api.getTip(id);
-        setDetail(tip);
-        if (tip) {
-          setEditorTitle(tip.title);
-          setEditorContent(tip.content);
-          setEditorBindings(
-            tip.bindings.map((b) => ({ agentId: b.agentId, autoAttach: b.autoAttach })),
-          );
-        }
-      } catch (err) {
-        setDetailError(desktopErrorMessage(err));
-      }
-    },
-    [api],
-  );
-
-  /** 列表有数据时保证右侧有选中项，不让详情区无意义留空。 */
-  const ensureSelection = useCallback(
-    async (list: TipSummary[]) => {
-      if (list.length === 0) {
-        selectedTipIdRef.current = null;
-        setSelectedTipId(null);
-        setDetail(null);
-        return;
-      }
-      const currentValid =
-        selectedTipIdRef.current && list.some((tip) => tip.id === selectedTipIdRef.current);
-      if (currentValid) {
-        return;
-      }
-      await openTip(list[0].id);
-    },
-    [openTip],
   );
 
   useEffect(() => {
@@ -130,6 +94,9 @@ export default function NoteLibraryWindow({
       })
       .catch((err) => {
         if (!cancelled) setLoadError(desktopErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -139,313 +106,502 @@ export default function NoteLibraryWindow({
   useEffect(() => {
     let cancelled = false;
     api
-      .listTips({ agentId: selectedAgentId, search: search.trim() || undefined })
-      .then(async (list) => {
+      .listTips(view === "used" ? { used: true } : {})
+      .then((list) => {
         if (cancelled) return;
-        setTips(list);
-        await ensureSelection(list);
+        if (view === "used") setUsedTips(list);
+        else setTips(list);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(desktopErrorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [api, ensureSelection, search, selectedAgentId]);
+  }, [api, view]);
 
-  const saveDetail = async () => {
-    if (!selectedTipId || saving) return;
-    const trimmed = editorContent.trim();
-    if (!trimmed) {
-      setDetailError("便签正文不能为空");
-      return;
+  // 真实多窗口下主窗口常驻：窗口重新获得焦点时刷新列表，
+  // 保证在 Quick Note 等其他窗口新建/修改 Tip 后主窗口数据不陈旧。
+  useEffect(() => {
+    function onFocus() {
+      void loadTips(view === "used");
     }
-    setSaving(true);
-    setDetailError(null);
-    try {
-      await api.updateTip(selectedTipId, {
-        title: editorTitle.trim() || undefined,
-        content: trimmed,
-        bindings: editorBindings,
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadTips, view]);
+
+  // Cmd/Ctrl + F 展开搜索
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        window.setTimeout(() => searchRef.current?.focus(), 0);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
+  // Undo Toast 5 秒自动消失
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const sourceTips = view === "used" ? usedTips : tips;
+  const filteredTips = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return sourceTips.filter((tip) => {
+      if (
+        selectedAgentIds.length > 0 &&
+        !tip.agentIds.some((id) => selectedAgentIds.includes(id))
+      ) {
+        return false;
+      }
+      if (needle) {
+        return (
+          tip.title.toLowerCase().includes(needle) ||
+          tip.content.toLowerCase().includes(needle) ||
+          tip.tags.some((tag) => tag.toLowerCase().includes(needle))
+        );
+      }
+      return true;
+    });
+  }, [search, selectedAgentIds, sourceTips]);
+
+  const hasActiveFilter = selectedAgentIds.length > 0;
+  const emptyWorkspace = !loading && !loadError && sourceTips.length === 0;
+  const noResults = !emptyWorkspace && filteredTips.length === 0;
+
+  const toggleAgentFilter = (agentId: string) => {
+    setSelectedAgentIds((current) =>
+      current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId],
+    );
+  };
+
+  const clearFilters = () => {
+    setSelectedAgentIds([]);
+    setSearch("");
+  };
+
+  const openTip = useCallback(
+    async (id: string) => {
+      try {
+        const tip = await api.getTip(id);
+        if (tip) setEditingTip(tip);
+      } catch (err) {
+        setLoadError(desktopErrorMessage(err));
+      }
+    },
+    [api],
+  );
+
+  const handleTextSaved = useCallback(
+    async (id: string, title: string, content: string) => {
+      const updated = await api.updateTipText(id, title, content);
+      const patch = (tip: TipSummary): TipSummary => ({
+        ...tip,
+        title: updated.title,
+        content: updated.content,
+        updatedAt: updated.updatedAt,
       });
-      setNotice("已保存");
-      window.setTimeout(() => setNotice(null), 900);
-      const list = await loadTips(selectedAgentId, search);
-      await ensureSelection(list);
-    } catch (err) {
-      setDetailError(desktopErrorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-  };
+      setTips((current) => current.map((tip) => (tip.id === id ? patch(tip) : tip)));
+      setUsedTips((current) => current.map((tip) => (tip.id === id ? patch(tip) : tip)));
+    },
+    [api],
+  );
 
-  const deleteSelected = async () => {
-    if (!selectedTipId) return;
-    setDeleteConfirm(false);
+  const handleTipUpdated = useCallback((updated: TipDetail) => {
+    const patch = (tip: TipSummary): TipSummary => ({
+      ...tip,
+      title: updated.title,
+      content: updated.content,
+      tags: updated.tags,
+      colorKey: updated.colorKey,
+      agentIds: updated.bindings.map((b) => b.agentId),
+      updatedAt: updated.updatedAt,
+    });
+    setTips((current) => current.map((tip) => (tip.id === updated.id ? patch(tip) : tip)));
+    setUsedTips((current) => current.map((tip) => (tip.id === updated.id ? patch(tip) : tip)));
+  }, []);
+
+  const handleTipDeleted = useCallback((id: string) => {
+    setTips((current) => current.filter((tip) => tip.id !== id));
+    setUsedTips((current) => current.filter((tip) => tip.id !== id));
+  }, []);
+
+  const handleMarkUsed = useCallback(
+    async (id: string) => {
+      const tip = tips.find((t) => t.id === id);
+      setLeavingIds((current) => [...current, id]);
+      window.setTimeout(() => {
+        setLeavingIds((current) => current.filter((x) => x !== id));
+        setTips((current) => current.filter((t) => t.id !== id));
+        setToast({ tipId: id, title: tip?.title ?? "便签" });
+      }, 180);
+      try {
+        await api.markTipUsed(id);
+        void loadTips(true);
+      } catch (err) {
+        setLoadError(desktopErrorMessage(err));
+      }
+    },
+    [api, loadTips, tips],
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (!toast) return;
+    const id = toast.tipId;
+    setToast(null);
     try {
-      await api.deleteTip(selectedTipId);
-      const list = await loadTips(selectedAgentId, search);
-      await ensureSelection(list);
+      await api.restoreTipUsed(id);
+      setUsedTips((current) => current.filter((t) => t.id !== id));
+      void loadTips(false);
     } catch (err) {
-      setDetailError(desktopErrorMessage(err));
+      setLoadError(desktopErrorMessage(err));
     }
-  };
+  }, [api, loadTips, toast]);
 
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
-  const agentCounts = new Map<string, number>();
-  for (const tip of tips) {
-    for (const agentId of tip.agentIds) {
-      agentCounts.set(agentId, (agentCounts.get(agentId) ?? 0) + 1);
-    }
-  }
-  const hasData = tips.length > 0;
-  const emptyState = !hasData && !search;
+  const handleRestoreUsed = useCallback(
+    async (id: string) => {
+      try {
+        await api.restoreTipUsed(id);
+        setUsedTips((current) => current.filter((t) => t.id !== id));
+        setView("home");
+        void loadTips(false);
+      } catch (err) {
+        setLoadError(desktopErrorMessage(err));
+      }
+    },
+    [api, loadTips],
+  );
+
+  const renderToolbar = () => (
+    <div className="flex items-center gap-1">
+      {searchOpen ? (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+          <Input
+            ref={searchRef}
+            aria-label="搜索便签"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索便签…"
+            className="h-8 w-64 pl-8 pr-8"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setSearchOpen(false);
+                setSearch("");
+              }
+            }}
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="清除搜索"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-text-muted hover:text-text-primary focus:outline-none focus-visible:bg-surface-hover"
+              onClick={() => setSearch("")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label="搜索"
+          onClick={() => setSearchOpen(true)}
+        >
+          <Search className="h-4 w-4" />
+        </Button>
+      )}
+      {view === "home" && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label="新建提示"
+          onClick={onNewTip}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="更多操作">
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          {view === "home" && (
+            <>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <SlidersHorizontal className="h-4 w-4" />
+                  筛选
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  <p className="px-2 py-1 text-secondary-size font-medium text-text-muted">Agent</p>
+                  {agents.map((agent) => {
+                    const checked = selectedAgentIds.includes(agent.id);
+                    return (
+                      <div
+                        key={agent.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-hover"
+                        onClick={() => toggleAgentFilter(agent.id)}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          aria-label={`筛选 ${agent.name}`}
+                          className="pointer-events-none"
+                        />
+                        <span className="flex-1">{agent.name}</span>
+                      </div>
+                    );
+                  })}
+                  <DropdownMenuSeparator />
+                  <button
+                    type="button"
+                    className="w-full rounded-md px-2 py-1 text-left text-sm text-text-muted hover:bg-surface-hover focus:outline-none"
+                    onClick={clearFilters}
+                  >
+                    清除全部筛选
+                  </button>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onSelect={() => setView("used")}>
+                <Archive className="h-4 w-4" />
+                已使用便签
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem onSelect={onOpenSettings}>
+            <Settings className="h-4 w-4" />
+            设置
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <Info className="h-4 w-4" />
+            关于
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
 
   return (
     <main
-      className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
+      className="flex h-screen flex-col overflow-hidden bg-surface-canvas text-text-primary"
       data-window="main"
       data-testid="main-layout"
     >
-      <header className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-        <h2 className="text-heading font-semibold tracking-tight">提示库</h2>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" aria-label="打开设置" onClick={onOpenSettings}>
-            <Settings className="h-4 w-4" />
-            设置
-          </Button>
-          <Button size="sm" aria-label="新建提示" onClick={onNewTip}>
-            <Plus className="h-4 w-4" />
-            新建提示
-          </Button>
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {view === "used" ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 px-2"
+                aria-label="返回首页"
+                onClick={() => setView("home")}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <h2 className="text-page-title font-semibold tracking-tight">已使用</h2>
+            </>
+          ) : (
+            <h2 className="text-page-title font-semibold tracking-tight">AgentTips</h2>
+          )}
         </div>
+        {renderToolbar()}
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-52 shrink-0 flex-col gap-1 p-3">
-          <Button
-            variant={selectedAgentId === undefined ? "secondary" : "ghost"}
-            size="sm"
-            className="justify-start"
-            aria-label="筛选全部便签"
-            onClick={() => setSelectedAgentId(undefined)}
-          >
-            <span className="flex-1 truncate text-left">全部便签</span>
-            <span className="text-[11px] text-muted-foreground">{tips.length}</span>
-          </Button>
-          <Separator className="my-2" />
-          <p className="px-2 pb-1 text-aux font-medium text-muted-foreground">Agent</p>
-          <div className="flex flex-col gap-0.5">
-            {agents.map((agent) => (
-              <Button
-                key={agent.id}
-                variant={selectedAgentId === agent.id ? "secondary" : "ghost"}
-                size="sm"
-                className="justify-start"
-                aria-label={`筛选 ${agent.name}`}
-                title={agent.kind === "terminal" ? "终端 Agent" : "桌面 Agent"}
-                onClick={() => setSelectedAgentId(agent.id)}
-              >
-                <span className="flex-1 truncate text-left">{agent.name}</span>
-                <span className="text-[11px] text-muted-foreground">
-                  {agentCounts.get(agent.id) ?? 0}
-                </span>
-              </Button>
-            ))}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {hasActiveFilter && (
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pt-2.5">
+            {selectedAgentIds.map((agentId) => {
+              const agent = agents.find((a) => a.id === agentId);
+              if (!agent) return null;
+              return (
+                <button
+                  key={agentId}
+                  type="button"
+                  aria-label={`清除 ${agent.name} 筛选`}
+                  className="flex items-center gap-1 rounded-full bg-surface-secondary px-2.5 py-1 text-secondary-size text-text-secondary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
+                  onClick={() => toggleAgentFilter(agentId)}
+                >
+                  {agent.name}
+                  <X className="h-3 w-3" />
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              className="px-1 text-secondary-size text-text-muted underline-offset-2 hover:underline focus:outline-none"
+              onClick={clearFilters}
+            >
+              清除全部
+            </button>
           </div>
-        </aside>
+        )}
 
-        <section className="flex w-80 shrink-0 flex-col border-x">
-          <div className="p-3">
-            <SearchInput value={search} onChange={setSearch} />
-          </div>
-          <div className="px-3 pb-1 text-aux text-muted-foreground">
-            {selectedAgent ? `${selectedAgent.name} 的提示` : "全部提示"} · {tips.length} 条
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-            {loadError ? (
-              <EmptyState
-                title="加载失败"
-                description={loadError}
-                action={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void loadTips(selectedAgentId, search)}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    重试
-                  </Button>
-                }
-              />
-            ) : loading && tips.length === 0 ? (
-              <p className="py-10 text-center text-aux text-muted-foreground">加载中…</p>
-            ) : emptyState ? (
-              <EmptyState
-                title="还没有提示"
-                description="按 Ctrl + F12 随时记录一条提示，或在下方新建"
-                action={
+        <div className="min-h-0 flex-1 p-4">
+          {loadError ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <p className="text-body text-danger">{loadError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLoading(true);
+                  void loadTips(view === "used");
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                重试
+              </Button>
+            </div>
+          ) : loading && sourceTips.length === 0 ? (
+            <p className="py-16 text-center text-secondary-size text-text-muted">加载中…</p>
+          ) : emptyWorkspace ? (
+            <div
+              className="flex h-full flex-col items-center justify-center gap-3 text-center"
+              data-testid="empty-workspace"
+            >
+              <div className="rounded-full bg-surface-secondary p-4">
+                <Plus className="h-6 w-6 text-text-muted" />
+              </div>
+              <p className="text-body font-semibold">
+                {view === "used" ? "还没有已使用的便签" : "还没有便签"}
+              </p>
+              <p className="max-w-xs text-secondary-size text-text-muted">
+                {view === "used"
+                  ? "标记为已使用的便签会收进这里。"
+                  : "随时记录你希望 Agent 记住的事情。"}
+              </p>
+              {view === "home" && (
+                <>
                   <Button size="sm" onClick={onNewTip}>
                     <Plus className="h-4 w-4" />
-                    新建提示
+                    创建第一张便签
                   </Button>
-                }
-              />
-            ) : tips.length === 0 ? (
-              <EmptyState title="没有匹配的提示" description="换个关键词或 Agent 试试" />
-            ) : (
-              <div className="flex flex-col gap-2">
-                {tips.map((tip) => (
-                  <TipCard
-                    key={tip.id}
-                    tip={tip}
-                    agents={agents}
-                    selected={tip.id === selectedTipId}
-                    onClick={() => void openTip(tip.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="min-w-0 flex-1 overflow-hidden">
-          {detail ? (
-            <div className="flex h-full flex-col">
-              <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
-                <h3 className="text-sm font-medium">编辑提示</h3>
-                <div className="flex items-center gap-2">
-                  {notice && <span className="text-aux text-success">{notice}</span>}
-                  {detail.status === "archived" && <Badge variant="secondary">已归档</Badge>}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    aria-label="删除提示"
-                    onClick={() => setDeleteConfirm(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    删除
-                  </Button>
-                </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                <div className="flex h-full flex-col gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="detail-title">标题</Label>
-                    <Input
-                      id="detail-title"
-                      value={editorTitle}
-                      onChange={(event) => setEditorTitle(event.target.value)}
-                      placeholder="标题（可选）"
-                    />
-                  </div>
-                  <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-                    <Label htmlFor="detail-content">正文</Label>
-                    <Textarea
-                      id="detail-content"
-                      value={editorContent}
-                      onChange={(event) => setEditorContent(event.target.value)}
-                      rows={8}
-                      className="min-h-0 flex-1 resize-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label className="mb-1 text-muted-foreground">绑定 Agent</Label>
-                    <AgentMultiSelect
-                      agents={agents}
-                      selectedIds={editorBindings.map((b) => b.agentId)}
-                      onChange={(ids) =>
-                        setEditorBindings((current) => {
-                          const existing = new Map(current.map((b) => [b.agentId, b]));
-                          return ids.map(
-                            (id) => existing.get(id) ?? { agentId: id, autoAttach: true },
-                          );
-                        })
-                      }
-                      disabled={saving}
-                      showSelected={false}
-                    />
-                    {editorBindings.length > 0 && (
-                      <div className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-0.5">
-                        {editorBindings.map((binding) => {
-                          const agent = agents.find((a) => a.id === binding.agentId);
-                          if (!agent) return null;
-                          return (
-                            <AgentBindingRow
-                              key={binding.agentId}
-                              agentName={agent.name}
-                              checked={binding.autoAttach}
-                              disabled={saving}
-                              onCheckedChange={(autoAttach) =>
-                                setEditorBindings((current) =>
-                                  current.map((b) =>
-                                    b.agentId === binding.agentId ? { ...b, autoAttach } : b,
-                                  ),
-                                )
-                              }
-                              onRemove={() =>
-                                setEditorBindings((current) =>
-                                  current.filter((b) => b.agentId !== binding.agentId),
-                                )
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t px-4 py-2.5">
-                {detailError ? (
-                  <span className="text-aux text-destructive" role="alert">
-                    {detailError}
-                  </span>
-                ) : (
-                  <span />
-                )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={saving}
-                    onClick={() => void openTip(selectedTipId!)}
-                  >
-                    还原
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={saving || !editorContent.trim()}
-                    onClick={() => void saveDetail()}
-                  >
-                    {saving ? "保存中…" : "保存修改"}
-                  </Button>
-                </div>
-              </div>
+                  <p className="text-caption text-text-muted">
+                    <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
+                      Ctrl
+                    </kbd>
+                    <span className="mx-0.5">+</span>
+                    <kbd className="rounded-sm border border-border-default bg-surface-primary px-1 py-0.5 font-sans text-caption shadow-sm">
+                      F12
+                    </kbd>
+                  </p>
+                </>
+              )}
+            </div>
+          ) : noResults ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+              <p className="text-body font-medium">没有匹配的便签</p>
+              <p className="text-secondary-size text-text-muted">换个关键词或清除筛选试试</p>
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-aux text-muted-foreground">
-                {emptyState ? "从左侧新建第一条提示" : "从列表选择一条提示"}
-              </p>
-            </div>
+            <MasonryGrid data-testid="tip-grid" className="pb-8" gap={14}>
+              {filteredTips.map((tip) => (
+                <TipCard
+                  key={tip.id}
+                  tip={tip}
+                  agents={agents}
+                  onExpand={() => void openTip(tip.id)}
+                  onTextChange={handleTextSaved}
+                  onMarkUsed={view === "home" ? (id) => void handleMarkUsed(id) : undefined}
+                  onRestoreUsed={view === "used" ? (id) => void handleRestoreUsed(id) : undefined}
+                  usedView={view === "used"}
+                  leaving={leavingIds.includes(tip.id)}
+                />
+              ))}
+            </MasonryGrid>
           )}
-        </section>
+        </div>
       </div>
 
-      <ConfirmActionDialog
-        open={deleteConfirm}
-        title="删除提示？"
-        description="删除后无法恢复。"
-        confirmLabel="删除"
-        destructive
-        onConfirm={() => void deleteSelected()}
-        onCancel={() => setDeleteConfirm(false)}
+      <NoteEditorDialog
+        tip={editingTip}
+        agents={agents}
+        api={api}
+        onClose={() => setEditingTip(null)}
+        onTipUpdated={handleTipUpdated}
+        onTipDeleted={handleTipDeleted}
       />
+
+      {toast && (
+        <div
+          className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-border-default bg-surface-primary px-4 py-2 shadow-popover"
+          role="status"
+          data-testid="used-toast"
+        >
+          <span className="text-secondary-size text-text-primary">已移至「已使用」</span>
+          <button
+            type="button"
+            className="text-secondary-size font-medium text-accent hover:text-accent-hover focus:outline-none"
+            onClick={() => void handleUndo()}
+          >
+            撤销
+          </button>
+        </div>
+      )}
     </main>
+  );
+}
+
+/**
+ * Variable-height Masonry：CSS Grid + ResizeObserver + grid-auto-rows。
+ * 每张卡片按实际高度计算 span，短卡保持短、长卡向下生长。
+ */
+function MasonryGrid({
+  children,
+  className,
+  gap = 14,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { gap?: number }) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const rowUnit = 8;
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const observer = new ResizeObserver(() => {
+      const cards = grid.querySelectorAll<HTMLElement>("[data-testid='tip-card']");
+      cards.forEach((card) => {
+        const height = card.getBoundingClientRect().height;
+        const span = Math.max(1, Math.ceil((height + gap) / (rowUnit + gap)));
+        card.style.gridRowEnd = `span ${span}`;
+      });
+    });
+    observer.observe(grid);
+    const cards = grid.querySelectorAll<HTMLElement>("[data-testid='tip-card']");
+    cards.forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [gap, children]);
+
+  return (
+    <div
+      ref={gridRef}
+      className={`grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] items-start ${className ?? ""}`}
+      style={{
+        gridAutoRows: `${rowUnit}px`,
+        gap: `${gap}px`,
+        gridAutoFlow: "row dense",
+      }}
+      {...props}
+    >
+      {children}
+    </div>
   );
 }

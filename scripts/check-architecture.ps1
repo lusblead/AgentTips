@@ -59,10 +59,10 @@ foreach ($file in $applicationFiles) {
     }
 }
 
-# 6. SQL 只能出现在 migrations/*.sql 与 adapters/sqlite.rs
+# 6. SQL 只能出现在 migrations/*.sql 与 adapters/（sqlite.rs、sqlite_hotkey_settings.rs 等 SQLite adapter）
 $rustFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src") -Recurse -Filter *.rs
 foreach ($file in $rustFiles) {
-    if ($file.FullName -match 'adapters\\sqlite\.rs$') { continue }
+    if ($file.FullName -match 'adapters\\(sqlite\.rs|sqlite_hotkey_settings\.rs)$') { continue }
     $content = Get-Content -Raw -Encoding UTF8 $file.FullName
     if ($content -cmatch '\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b') {
         $failures += "SQL 出现在非 SQLite adapter 文件: $($file.FullName)"
@@ -96,6 +96,101 @@ foreach ($file in $featureTests) {
     $content = Get-Content -Raw -Encoding UTF8 $file.FullName
     if ($content -match 'TauriDesktopApi') {
         $failures += "feature 测试直接引用 TauriDesktopApi（应注入 mock adapter）: $($file.FullName)"
+    }
+}
+
+# 10. feature 目录不得 import @tauri-apps/api/window|webviewWindow 或 new WebviewWindow
+$featureAllFiles = Get-ChildItem -Path (Join-Path $root "src\features") -Recurse -Include *.ts, *.tsx
+foreach ($file in $featureAllFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match '@tauri-apps/api/window|@tauri-apps/api/webviewWindow|new\s+WebviewWindow\s*\(') {
+        $failures += "feature 使用 Tauri 窗口 API: $($file.FullName)"
+    }
+}
+
+# 11. Rust application 不依赖具体 Tauri window 类型
+$appRustFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\application") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+foreach ($file in $appRustFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'tauri::WebviewWindow|WebviewWindowBuilder') {
+        $failures += "application 依赖具体 Tauri window 类型: $($file.FullName)"
+    }
+}
+
+# 12. feature 不得 import @tauri-apps/plugin-global-shortcut 或直接 register/unregister
+foreach ($file in $featureAllFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match '@tauri-apps/plugin-global-shortcut|\bregister\s*\(|\bunregister\s*\(') {
+        $failures += "feature 直接操作 global shortcut 插件: $($file.FullName)"
+    }
+}
+
+# 13. Rust domain/application/ports 不得依赖 tauri_plugin_global_shortcut（仅 adapter）
+$hotkeyBoundaryLayers = @("domain", "application", "ports")
+foreach ($layer in $hotkeyBoundaryLayers) {
+    $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+    foreach ($file in $layerFiles) {
+        $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+        if ($content -match 'tauri_plugin_global_shortcut') {
+            $failures += "$layer 依赖 global-shortcut 插件: $($file.FullName)"
+        }
+    }
+}
+
+# 14. Rust domain/application/ports 不得依赖 windows/windows-sys/winapi（仅 adapter）
+$windowsBoundaryLayers = @("domain", "application", "ports")
+foreach ($layer in $windowsBoundaryLayers) {
+    $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+    foreach ($file in $layerFiles) {
+        $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+        if ($content -match 'windows_sys|windows::|winapi') {
+            $failures += "$layer 依赖 Windows API: $($file.FullName)"
+        }
+    }
+}
+
+# 15. Rust domain/application/ports 不得依赖 Toolhelp/WMI（仅 adapter）
+$processBoundaryLayers = @("domain", "application", "ports")
+foreach ($layer in $processBoundaryLayers) {
+    $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+    foreach ($file in $layerFiles) {
+        $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+        if ($content -match 'CreateToolhelp32Snapshot|TH32CS_SNAPPROCESS|Win32_Process|WmiMonitor') {
+            $failures += "$layer 依赖进程/WMI API: $($file.FullName)"
+        }
+    }
+}
+
+# 16. React feature 不得自行轮询 detection / 计算 cooldown（Reminder 决策只在 Rust）
+$featureAllFiles = Get-ChildItem -Path (Join-Path $root "src\features") -Recurse -Include *.ts, *.tsx -ErrorAction SilentlyContinue
+foreach ($file in $featureAllFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'getDesktopDetectionStatus|setInterval') {
+        $failures += "feature 轮询 detection 或自行定时计算提醒: $($file.FullName)"
+    }
+    if ($file.FullName -match '\\reminder\\' -and $content -match 'cooldownMinutes') {
+        $failures += "reminder feature 出现 cooldown 决策字段: $($file.FullName)"
+    }
+}
+
+# 17. Detection adapter 不得直接引用 Reminder/TipRepository（Reminder 只能经 Coordinator）
+$detectionAdapters = @("windows_foreground.rs", "windows_process_tree.rs")
+foreach ($adapter in $detectionAdapters) {
+    $adapterPath = Join-Path $root "src-tauri\src\adapters\$adapter"
+    if (Test-Path $adapterPath) {
+        $content = Get-Content -Raw -Encoding UTF8 $adapterPath
+        if ($content -match 'ReminderPresenter|TipRepository|ReminderCoordinator') {
+            $failures += "detection adapter 直接引用 Reminder/TipRepository: $adapterPath"
+        }
+    }
+}
+
+# 18. Rust ports 不依赖具体 Tauri window 类型（仅 adapter）
+$portFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\ports") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
+foreach ($file in $portFiles) {
+    $content = Get-Content -Raw -Encoding UTF8 $file.FullName
+    if ($content -match 'WebviewWindow|AppHandle') {
+        $failures += "ports 依赖具体 Tauri window 类型: $($file.FullName)"
     }
 }
 

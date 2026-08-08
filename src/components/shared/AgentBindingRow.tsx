@@ -18,10 +18,10 @@ export function AgentBindingRow({
   onRemove,
 }: AgentBindingRowProps) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-1.5">
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border-subtle bg-surface-primary px-3 py-1.5">
       <span className="truncate text-tip font-medium">{agentName}</span>
       <span className="flex shrink-0 items-center gap-3">
-        <label className="flex items-center gap-1.5 text-aux text-muted-foreground">
+        <label className="flex items-center gap-1.5 text-aux text-text-muted">
           默认携带
           <Switch
             aria-label={`${agentName} 默认携带`}
@@ -33,7 +33,7 @@ export function AgentBindingRow({
         <button
           type="button"
           aria-label={`移除 ${agentName}`}
-          className="rounded-sm text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-sm text-text-muted hover:text-text-primary focus:outline-none focus-visible:bg-surface-hover"
           onClick={onRemove}
         >
           <X className="h-4 w-4" />

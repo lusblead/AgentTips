@@ -7,14 +7,22 @@ import {
   type CreateTipInput,
   type DesktopApi,
   type DesktopError,
+  type DesktopDetectionStatus,
   type HotkeyCandidate,
+  type HotkeyBinding,
   type HotkeyPreviewResult,
+  type HotkeyRuntimeState,
   type MockFailureKind,
-  type ReminderPreview,
+  type NoteColorKey,
+  type QuickNoteCloseRequestedPayload,
+  type QuickNoteResetPayload,
+  type ReminderPayloadDto,
+  type ReminderSettings,
   type TipDetail,
   type TipQuery,
   type TipSummary,
   type UpdateTipInput,
+  type WindowKind,
 } from "./contract";
 
 const FALLBACK_SETTINGS: AppSettings = {
@@ -27,14 +35,6 @@ const FALLBACK_SETTINGS: AppSettings = {
     highConflict: false,
   },
 };
-
-function notImplemented(feature: string): never {
-  const error: DesktopError = {
-    code: ERROR_CODES.INTERNAL_ERROR,
-    message: `${feature} 尚未实现（后续阶段接入）`,
-  };
-  throw error;
-}
 
 /**
  * 把 Tauri invoke 的 rejection 转换为统一 DesktopError。
@@ -82,6 +82,14 @@ export class TauriDesktopApi implements DesktopApi {
     }
   }
 
+  async listTags(): Promise<string[]> {
+    try {
+      return await invoke<string[]>("tag_list");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
   async getTip(id: string): Promise<TipDetail | null> {
     try {
       return await invoke<TipDetail | null>("tip_get", { id });
@@ -116,6 +124,109 @@ export class TauriDesktopApi implements DesktopApi {
     }
   }
 
+  async suggestNoteColor(): Promise<NoteColorKey> {
+    try {
+      return await invoke<NoteColorKey>("note_color_suggest");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateTipText(id: string, title: string, content: string): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_update_text", {
+        input: { id, title, content },
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async markTipUsed(id: string): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_mark_used", { id });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async restoreTipUsed(id: string): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_restore_used", { id });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateTipColor(id: string, colorKey: NoteColorKey): Promise<TipDetail> {
+    try {
+      return await invoke<TipDetail>("tip_update_color", { id, colorKey });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async openMainWindow(): Promise<void> {
+    try {
+      await invoke<void>("window_open_main");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async openQuickNoteWindow(): Promise<void> {
+    try {
+      await invoke<void>("window_open_quick_note");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async openSettingsWindow(): Promise<void> {
+    try {
+      await invoke<void>("window_open_settings");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async hideCurrentWindow(label: string): Promise<void> {
+    try {
+      await invoke<void>("window_hide_current", { label });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getWindowKind(): Promise<WindowKind> {
+    // desktop-api 适配层读取当前 WebviewWindow label（feature 不感知）
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const label = getCurrentWindow().label;
+    if (label === "quick-note" || label === "settings" || label === "reminder") {
+      return label;
+    }
+    return "main";
+  }
+
+  async subscribeQuickNoteReset(
+    handler: (payload: QuickNoteResetPayload) => void,
+  ): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<QuickNoteResetPayload>("agenttips://quick-note/reset", (event) =>
+      handler(event.payload),
+    );
+  }
+
+  async subscribeQuickNoteCloseRequested(
+    handler: (payload: QuickNoteCloseRequestedPayload) => void,
+  ): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<QuickNoteCloseRequestedPayload>(
+      "agenttips://quick-note/close-requested",
+      (event) => handler(event.payload),
+    );
+  }
+
   async listAgents(): Promise<Agent[]> {
     try {
       return await invoke<Agent[]>("agent_list");
@@ -129,12 +240,99 @@ export class TauriDesktopApi implements DesktopApi {
     return { ...FALLBACK_SETTINGS, hotkey: { ...FALLBACK_SETTINGS.hotkey } };
   }
 
-  async previewHotkey(_input: HotkeyCandidate): Promise<HotkeyPreviewResult> {
-    return notImplemented("快捷键录制校验");
+  async previewHotkey(input: HotkeyCandidate): Promise<HotkeyPreviewResult> {
+    try {
+      return await invoke<HotkeyPreviewResult>("hotkey_preview", {
+        modifier: input.modifier,
+        keyCode: input.keyCode,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
   }
 
-  async getReminderPreview(): Promise<ReminderPreview> {
-    return notImplemented("自动提醒");
+  async getHotkeySettings(): Promise<HotkeyRuntimeState> {
+    try {
+      return await invoke<HotkeyRuntimeState>("hotkey_get");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateHotkey(input: HotkeyCandidate): Promise<HotkeyBinding> {
+    try {
+      return await invoke<HotkeyBinding>("hotkey_update", {
+        modifier: input.modifier,
+        keyCode: input.keyCode,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async beginHotkeyRecording(): Promise<void> {
+    try {
+      await invoke<void>("hotkey_recording_begin");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async endHotkeyRecording(): Promise<void> {
+    try {
+      await invoke<void>("hotkey_recording_end");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getDesktopDetectionStatus(): Promise<DesktopDetectionStatus> {
+    try {
+      return await invoke<DesktopDetectionStatus>("desktop_detection_get_current");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getReminderSettings(): Promise<ReminderSettings> {
+    try {
+      return await invoke<ReminderSettings>("reminder_settings_get");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async updateReminderSettings(cooldownMinutes: number): Promise<ReminderSettings> {
+    try {
+      return await invoke<ReminderSettings>("reminder_settings_update", {
+        cooldownMinutes,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async dismissReminder(): Promise<void> {
+    try {
+      await invoke<void>("reminder_dismiss");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getCurrentReminderPayload(): Promise<ReminderPayloadDto | null> {
+    try {
+      return await invoke<ReminderPayloadDto | null>("reminder_get_current_payload");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async subscribeReminderShow(handler: (payload: ReminderPayloadDto) => void): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<ReminderPayloadDto>("agenttips://reminder/show", (event) =>
+      handler(event.payload),
+    );
   }
 
   setMockFailure(_kind: MockFailureKind, _enabled: boolean): void {

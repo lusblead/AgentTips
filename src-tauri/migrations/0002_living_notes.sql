@@ -1,0 +1,2 @@
+ALTER TABLE tips ADD COLUMN color_key TEXT NOT NULL DEFAULT 'lemon';
+ALTER TABLE tips ADD COLUMN used_at TEXT;

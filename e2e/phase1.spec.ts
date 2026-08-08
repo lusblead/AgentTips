@@ -17,8 +17,56 @@ test.describe("Phase 1.5 交互流程", () => {
     const textarea = page.getByLabel("正文");
     await expect(textarea).toHaveValue("");
     await textarea.fill("通过快捷键保存的便签");
+    const tagInput = page.getByRole("combobox", { name: "添加标签" });
+    await tagInput.click();
+    await page.getByRole("option", { name: "测试" }).click();
+    await tagInput.fill("快捷记录");
+    await tagInput.press("Enter");
+    await expect(page.getByRole("button", { name: "移除标签 测试" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "移除标签 快捷记录" })).toBeVisible();
+    await page.getByRole("button", { name: /添加 Agent/ }).click();
+    await page.getByRole("menuitem", { name: /Cursor/ }).click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('[role="menu"]') &&
+        Boolean(document.querySelector('[aria-label="Cursor 默认携带"]')),
+    );
+    await page.waitForTimeout(120);
+    await textarea.click();
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("status")).toHaveText("已保存");
+    await expect(textarea).toHaveValue("");
+    await expect(page.getByRole("button", { name: "移除标签 测试" })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("dirty quick note requires discard confirmation from keyboard and close button", async ({
+    page,
+  }) => {
+    const errors = trackConsole(page);
+    await page.setViewportSize({ width: 380, height: 320 });
+    await page.goto("/?window=quick-note");
+    const textarea = page.getByLabel("正文");
+    await textarea.fill("这段未保存内容不能被静默丢弃");
+
+    await page.keyboard.press("Escape");
+    const dialog = page.getByRole("dialog", { name: "放弃这条便签？" });
+    await expect(dialog).toBeVisible();
+    await expect(textarea).toHaveValue("这段未保存内容不能被静默丢弃");
+    await page.getByRole("button", { name: "继续编辑" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(textarea).toBeFocused();
+
+    await page.getByRole("button", { name: "关闭" }).click();
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(380);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(320);
+    await page.getByRole("button", { name: "放弃内容" }).click();
+    await expect(dialog).not.toBeVisible();
     await expect(textarea).toHaveValue("");
     expect(errors).toEqual([]);
   });
@@ -26,22 +74,28 @@ test.describe("Phase 1.5 交互流程", () => {
   test("主窗口：搜索与 Agent 筛选", async ({ page }) => {
     const errors = trackConsole(page);
     await page.goto("/?window=main");
-    await expect(page.getByText("修改前解释调用链")).toBeVisible();
+    await expect(page.getByLabel("标题").first()).toHaveValue("修改前解释调用链");
 
+    await page.getByRole("button", { name: "搜索" }).click();
     await page.getByLabel("搜索便签").fill("测试");
-    await expect(page.getByText("完成后运行全部测试")).toBeVisible();
-    await expect(page.getByText("修改前解释调用链")).not.toBeVisible();
+    await expect(page.getByLabel("标题").first()).toHaveValue("完成后运行全部测试");
+    await expect(page.getByLabel("标题").first()).not.toHaveValue("修改前解释调用链");
 
     await page.getByLabel("搜索便签").fill("");
-    await page.getByRole("button", { name: "筛选 Cursor" }).click();
-    await expect(page.getByText("修改前解释调用链")).toBeVisible();
-    await expect(page.getByText("完成后运行全部测试")).not.toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: /筛选/ }).hover();
+    await page.getByRole("menuitem", { name: /筛选/ }).dispatchEvent("mouseenter");
+    await page.getByRole("checkbox", { name: "筛选 Cursor" }).waitFor({ timeout: 5000 });
+    await page.locator('div:has(> [aria-label="筛选 Cursor"])').first().click({ force: true });
+    await expect(page.getByLabel("标题").first()).toHaveValue("修改前解释调用链");
+    await expect(page.getByLabel("标题").first()).not.toHaveValue("完成后运行全部测试");
     expect(errors).toEqual([]);
   });
 
   test("提醒窗口：聚合、收起与忽略", async ({ page }) => {
     const errors = trackConsole(page);
-    await page.goto("/?window=reminder");
+    await page.goto("/?window=reminder&demo=expanded");
     const dialog = page.getByRole("dialog", { name: "Cursor 提醒" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("3 条提示")).toBeVisible();
@@ -65,7 +119,7 @@ test.describe("Phase 1.5 交互流程", () => {
 
     await page.getByRole("button", { name: "重新录制" }).click();
     await page.keyboard.press("Control+k");
-    await expect(page.getByText("已保存 Ctrl + K")).toBeVisible();
+    await expect(page.getByText("已更新 Ctrl + K")).toBeVisible();
     await expect(display).toHaveText("Ctrl + K");
 
     await page.getByRole("button", { name: "重新录制" }).click();

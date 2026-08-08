@@ -36,11 +36,41 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("feature 目录不得导入 @tauri-apps/api/window 或 webviewWindow，且不得 new WebviewWindow", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      if (
+        content.includes("@tauri-apps/api/window") ||
+        content.includes("@tauri-apps/api/webviewWindow") ||
+        /new\s+WebviewWindow\s*\(/.test(content)
+      ) {
+        violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
   it("feature 目录不得直接调用 invoke() 或 listen()", () => {
     const violations: string[] = [];
     for (const file of listFiles(featuresDir)) {
       const content = readFileSync(file, "utf8");
       if (/\binvoke\s*\(|\blisten\s*\(/.test(content)) {
+        violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("feature 目录不得导入 @tauri-apps/plugin-global-shortcut 或直接 register/unregister", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      if (
+        content.includes("@tauri-apps/plugin-global-shortcut") ||
+        /\bregister\s*\(/.test(content) ||
+        /\bunregister\s*\(/.test(content)
+      ) {
         violations.push(relative(src, file));
       }
     }
@@ -108,10 +138,100 @@ describe("架构边界（静态检查）", () => {
     expect(violations).toEqual([]);
   });
 
+  it("Rust application 不依赖具体 Tauri window 类型（仅 adapter 可用）", () => {
+    const appDir = join(srcTauri, "src", "application");
+    const violations: string[] = [];
+    for (const file of listRustFiles(appDir)) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("tauri::WebviewWindow") || content.includes("WebviewWindowBuilder")) {
+        violations.push(relative(root, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust domain/application/ports 不依赖 tauri_plugin_global_shortcut（仅 adapter 可用）", () => {
+    const violations: string[] = [];
+    for (const layer of ["domain", "application", "ports"]) {
+      for (const file of listRustFiles(join(srcTauri, "src", layer))) {
+        const content = readFileSync(file, "utf8");
+        if (content.includes("tauri_plugin_global_shortcut")) {
+          violations.push(relative(root, file));
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust domain/application/ports 不依赖 windows / windows-sys / winapi（仅 adapter 可用）", () => {
+    const violations: string[] = [];
+    for (const layer of ["domain", "application", "ports"]) {
+      for (const file of listRustFiles(join(srcTauri, "src", layer))) {
+        const content = readFileSync(file, "utf8");
+        for (const forbidden of ["windows_sys", "windows::", "winapi"]) {
+          if (content.includes(forbidden)) {
+            violations.push(`${relative(root, file)} -> ${forbidden}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust domain/application/ports 不依赖 Toolhelp / WMI（仅 adapter 可用）", () => {
+    const violations: string[] = [];
+    for (const layer of ["domain", "application", "ports"]) {
+      for (const file of listRustFiles(join(srcTauri, "src", layer))) {
+        const content = readFileSync(file, "utf8");
+        for (const forbidden of [
+          "CreateToolhelp32Snapshot",
+          "WmiMonitor",
+          "root\\wmi",
+          "TH32CS_SNAPPROCESS",
+        ]) {
+          if (content.includes(forbidden)) {
+            violations.push(`${relative(root, file)} -> ${forbidden}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Terminal 检测仅存在于 Rust（feature 无进程/命令行读取）", () => {
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      expect(content).not.toMatch(
+        /CreateToolhelp32Snapshot|QueryFullProcessImageName|Process32FirstW|Win32_Process/,
+      );
+    }
+  });
+
+  it("DesktopApi 暴露 getDesktopDetectionStatus 且 feature 不承担 detection", () => {
+    const contract = readFileSync(join(src, "desktop-api", "contract.ts"), "utf8");
+    expect(contract).toContain("getDesktopDetectionStatus");
+    // feature 不得出现 Windows 进程/前台扫描类 API
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      expect(content).not.toMatch(
+        /GetForegroundWindow|QueryFullProcessImageName|enumerateProcesses|scanSystemProcesses/,
+      );
+    }
+  });
+
+  it("HotkeyApplicationService 不依赖 TauriWindowManager", () => {
+    const hotkeyApp = readFileSync(join(srcTauri, "src", "application", "hotkey.rs"), "utf8");
+    expect(hotkeyApp).not.toMatch(/tauri_window_manager::|TauriWindowManager::/);
+  });
+
   it("SQL 只存在于 migrations 与 adapters/sqlite.rs", () => {
     const violations: string[] = [];
     for (const file of listRustFiles(join(srcTauri, "src"))) {
-      if (file.endsWith(join("adapters", "sqlite.rs"))) continue;
+      if (
+        file.includes(join("adapters", "sqlite.rs")) ||
+        file.includes(join("adapters", "sqlite_hotkey_settings.rs"))
+      )
+        continue;
       const content = readFileSync(file, "utf8");
       if (/\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b/.test(content)) {
         violations.push(relative(root, file));
@@ -144,6 +264,51 @@ describe("架构边界（静态检查）", () => {
       const content = readFileSync(file, "utf8");
       if (content.includes("TauriDesktopApi")) {
         violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("React 不自行计算 Reminder cooldown（不得轮询 detection 决定提醒）", () => {
+    const violations: string[] = [];
+    for (const file of listFiles(featuresDir)) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("getDesktopDetectionStatus") || content.includes("setInterval")) {
+        violations.push(relative(src, file));
+      }
+    }
+    // reminder feature 不得出现 cooldown 决策字段（设置页展示配置值允许）
+    for (const file of listFiles(join(featuresDir, "reminder"))) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("cooldownMinutes")) {
+        violations.push(relative(src, file));
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Detection adapter 不得直接引用 Reminder/TipRepository（Reminder 只能经 Coordinator）", () => {
+    const violations: string[] = [];
+    for (const file of listRustFiles(join(srcTauri, "src", "adapters"))) {
+      if (!file.includes("windows_foreground") && !file.includes("windows_process_tree")) {
+        continue;
+      }
+      const content = readFileSync(file, "utf8");
+      for (const forbidden of ["ReminderPresenter", "TipRepository", "ReminderCoordinator"]) {
+        if (content.includes(forbidden)) {
+          violations.push(`${relative(root, file)} -> ${forbidden}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("Rust ports 不依赖具体 Tauri window 类型", () => {
+    const violations: string[] = [];
+    for (const file of listRustFiles(join(srcTauri, "src", "ports"))) {
+      const content = readFileSync(file, "utf8");
+      if (content.includes("WebviewWindow") || content.includes("AppHandle")) {
+        violations.push(relative(root, file));
       }
     }
     expect(violations).toEqual([]);

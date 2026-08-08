@@ -6,13 +6,20 @@ describe("主窗口重新加载后读取 adapter 数据", () => {
   it("卸载后重新挂载仍能读取同一 adapter 的数据", async () => {
     const api = new MockDesktopApi();
     const first = render(<NoteLibraryWindow api={api} />);
-    await screen.findByText("修改前解释调用链");
+    await screen.findAllByTestId("tip-card");
     first.unmount();
 
     // 模拟应用重新加载：同一 adapter 实例仍持有数据（SQLite 语义为重启后仍可读）
     const second = render(<NoteLibraryWindow api={api} />);
-    expect(await screen.findByText("修改前解释调用链")).toBeInTheDocument();
-    expect(screen.getByText("完成后运行全部测试")).toBeInTheDocument();
+    const cards = await screen.findAllByTestId("tip-card");
+    expect(cards.length).toBeGreaterThanOrEqual(8);
+    expect(
+      cards.some(
+        (card) =>
+          card.querySelector('input[aria-label="标题"]')?.getAttribute("value") ===
+          "修改前解释调用链",
+      ),
+    ).toBe(true);
     second.unmount();
   });
 
@@ -26,7 +33,13 @@ describe("主窗口重新加载后读取 adapter 数据", () => {
     expect(created.id).toBeTruthy();
 
     const view = render(<NoteLibraryWindow api={api} />);
-    expect(await screen.findByText("重启后可见")).toBeInTheDocument();
+    const cards = await screen.findAllByTestId("tip-card");
+    expect(
+      cards.some(
+        (card) =>
+          card.querySelector('input[aria-label="标题"]')?.getAttribute("value") === "重启后可见",
+      ),
+    ).toBe(true);
     view.unmount();
   });
 });

@@ -39,7 +39,7 @@ pub enum DetectionResult {
     },
 }
 
-/// Agent 切换事件（Phase 4A 只更新内存状态，不触发 Reminder）。
+/// Agent 切换事件，由 application 层决定是否触发 Reminder。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Transition {

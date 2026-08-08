@@ -1,5 +1,5 @@
 /**
- * Phase 2.1 真实 Tauri UI 垂直链路验收。
+ * 真实 Tauri UI 垂直链路验收。
  *
  * 通过 WebView2 CDP 操作真实页面 DOM（点击/输入/键盘/路由切换）完成
  * 完整 CRUD，禁止直接调用 window.__TAURI_INTERNALS__.invoke 完成业务操作。
@@ -899,8 +899,8 @@ async function run() {
     }
     console.log("settings hotkey real update ok ✓ (Ctrl + F12 -> Ctrl + K, 立即生效)");
 
-    // Phase 3A 不创建真实 Reminder 窗口；reminder 中性占位由浏览器 e2e（?window=reminder）覆盖
-    console.log("reminder degraded: Phase 3A 无真实 Reminder 窗口，浏览器 e2e 覆盖 ✓");
+    // 本脚本不重复覆盖 Reminder 原生运行链路；浏览器状态由 E2E、原生行为由专用 runtime test 覆盖。
+    console.log("reminder coverage delegated to browser E2E and dedicated runtime test ✓");
     assertNoConsoleErrors(client, "degraded-pages");
 
     // ---- 主管理与快捷不受影响 ----

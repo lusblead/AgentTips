@@ -111,7 +111,7 @@ fn normalize_exe(exe: &str) -> String {
     exe.trim().to_lowercase()
 }
 
-/// 内存态（Phase 4A 不写 SQLite history）。
+/// 检测内存态，不写 SQLite history。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopDetectionRuntimeState {

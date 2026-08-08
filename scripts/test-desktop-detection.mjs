@@ -1,8 +1,8 @@
 /**
- * Phase 4A Desktop Agent Foreground Detection Runtime Test.
+ * Desktop Agent Foreground Detection Runtime Test.
  *
  * 使用独立 AGENTTIPS_TEST_DATA_DIR，不触碰正式 DB。
- * 场景（对应 Phase 4A §34）：
+ * 场景：
  *   A. 启动 AgentTips
  *   B. Notepad foreground → desktop_detection_get_current = NoMatch + processName=notepad.exe
  *   C. Hotkey 打开 Quick Note → SelfWindow + effective 保持

@@ -1,8 +1,8 @@
 /**
- * Phase 4B Terminal Detection Runtime Test.
+ * Terminal Detection Runtime Test.
  *
  * 使用独立 AGENTTIPS_TEST_DATA_DIR，不触碰正式 DB。
- * 场景（对应 Phase 4B §47）：
+ * 场景：
  *   A. 启动 AgentTips
  *   B. 打开 Windows Terminal 单 Tab 普通 shell → NoMatch（terminal_no_agent）
  *   C. 单 Tab 内启动 test-only 子进程（模拟 CLI wrapper 形态）→ Matched

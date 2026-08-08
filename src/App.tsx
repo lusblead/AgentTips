@@ -15,7 +15,7 @@ import HotkeySettingsWindow from "@/features/hotkey-settings";
  *   /?window=main&agentId=agent-cursor
  *   /?window=reminder&demo=expanded|collapsed|empty
  *   /?window=settings
- * Phase 2 起由 TauriDesktopApi 替换 MockDesktopApi。
+ * Tauri 环境使用 TauriDesktopApi，浏览器调试使用 MockDesktopApi。
  */
 export default function App() {
   const isTauri = "__TAURI_INTERNALS__" in window;

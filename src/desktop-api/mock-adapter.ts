@@ -24,7 +24,7 @@ import type {
   WindowKind,
 } from "./contract";
 
-/** 统一支持键集合（KeyboardEvent.code 格式）。Phase 2 起与 Rust 侧一致。 */
+/** 统一支持键集合（KeyboardEvent.code 格式），与 Rust 侧保持一致。 */
 export const SUPPORTED_KEY_CODES: readonly string[] = [
   "KeyA",
   "KeyB",

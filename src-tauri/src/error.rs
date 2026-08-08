@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-/// 应用统一错误。错误码与 docs/06-ipc-event-contracts.md 对齐。
+/// 应用统一错误；错误码在前后端契约中保持稳定。
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum AppError {
     #[error("输入无效: {0}")]

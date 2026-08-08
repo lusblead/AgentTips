@@ -1,7 +1,7 @@
 /**
- * Phase 3B Global Hotkey 真实 Windows Runtime Test。
+ * Global Hotkey 真实 Windows Runtime Test。
  *
- * 流程（对应 Phase 3B §45-46）：
+ * 流程：
  *   A. 启动 AgentTips（独立测试 DB），默认 Ctrl + F12
  *   B. 隐藏 Main / Quick Note / Settings
  *   C. 打开 Notepad 并获得焦点

@@ -1,50 +1,100 @@
-# AgentTips
+<div align="center">
+  <h1>AgentTips</h1>
+  <p><strong>给 AI 编程 Agent 使用者的 Windows 本地便签</strong></p>
+  <p>随时记录上下文，在对应桌面应用或终端 Agent 激活时看到真正相关的提醒。</p>
+  <p>
+    <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white">
+    <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white">
+    <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
+    <img alt="Rust 2021" src="https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white">
+  </p>
+</div>
 
-面向桌面与终端 AI Agent 的 Windows 本地便签工具：用可录制的全局快捷键快速创建便签，绑定到一个或多个 Agent，并在对应 Agent 激活时按规则自动展示相关便签。
+AgentTips 解决一个很具体的问题：使用多个 AI 编程工具时，重要约束、待办和上下文经常散落在聊天记录或临时文本里。它把这些内容保存为本地便签，并根据当前激活的 Agent 进行筛选和提醒。
 
-> 产品范围、冻结边界与完整设计见 [`AgentTips-Design-Package/`](AgentTips-Design-Package/README.md)。MVP 技术路线固定为 Tauri 2 + React + TypeScript + Rust + SQLite，**不实现**浏览器 Agent、LLM API、云同步、自动发送等能力。
+数据默认只保存在本机 SQLite 数据库中。AgentTips 不接入 LLM API，也不会自动把便签内容发送给任何 Agent。
 
-## 当前状态
+## 主要功能
 
-**Phase 0（工程基线）已完成**：Tauri 2 + React 19 + TS + Vite + pnpm 工程、Tailwind v4 主题 token、shadcn 风格组件、Rust 四层骨架、架构检查与全量验收脚本。
+- **全局快捷记录**：默认按 `Ctrl + F12` 打开紧凑的新建便签窗口；快捷键可在设置中重新录制。
+- **无标题便签**：新便签直接填写正文，不需要额外维护标题。
+- **自由标签**：标签由使用者直接输入，也可以复用过去写过的标签。
+- **Agent 绑定**：一条便签可绑定一个、多个或不绑定 Agent；开启“默认携带”后，可在对应 Agent 激活时参与提醒。
+- **自动识别**：通过 Windows 前台窗口和终端进程树识别当前桌面或命令行 Agent。
+- **冷却提醒**：按 Agent 独立控制提醒冷却时间，默认 15 分钟，可在 1～120 分钟之间调整。
+- **便签管理**：支持搜索、Agent 筛选、直接编辑、彩色便签、标记已使用、撤销和恢复。
+- **桌面运行体验**：支持多窗口、系统托盘、单实例运行和未保存草稿保护。
 
-**Phase 1（Mock 驱动 UI 原型）已完成**，**Phase 1.5（视觉与交互收束）已完成**，**Phase 2（真实垂直链路）已完成**，**Phase 2.1（真实 UI 垂直链路与数据层发布门禁）已完成**，**Phase 2.2（Visual System & Premium Desktop Polish）已完成**，**Phase 2.3（Home Experience Redesign）已完成**，**Phase 2.4（Living Notes）已完成**，**Phase 2.4R（Living Notes Product Contract Recovery）已完成**（2026-08-06/07）：
+## 内置 Agent
 
-- `DesktopApi` 契约 + `MockDesktopApi`（数据可预测、支持 reset 与模拟失败/延迟）；
-- 快捷新建窗口：每次空白、多 Agent 绑定与独立默认携带开关、`Ctrl+Enter` 保存、防重复提交、失败保留输入；
-- 主管理窗口三栏：Agent 筛选、搜索、详情编辑、删除确认、空态/无结果/加载/错误态；
-- Agent 提醒窗口：聚合展示、展开/收起/胶囊、本次忽略、"查看全部"（按 Agent 过滤进入主窗口）；
-- 设置页快捷键录制：`Ctrl + 单键` 规则、额外修饰键拒绝、Esc/点击外部取消、冲突警告，全部只走 Mock；
-- 浏览器调试入口：`/?window=quick-note|main|reminder|settings`（提醒支持 `&demo=collapsed|empty`，主窗口支持 `&empty=1`、`&agentId=`）；
-- 34 个 Vitest 组件/架构测试 + 17 个 Playwright E2E（交互、截图、布局溢出、控制台无错误）。
-- Phase 1.5：统一中文文案与“提示”称呼；视觉 Token（正文 14px / 辅助 13px / 标题 17px，圆角 7-8-12px，动效 150ms）；主窗口增加新建/设置入口、默认选中第一条、Agent 数量、统一空态；快捷窗口绑定行一体化；提醒窗口轻量列表与折叠动画；设置页区分当前快捷键与录制候选、显示实际检测组合；截图更新至 `artifacts/screenshots/phase-1.5/`。
-- Phase 2：打通 Tip / Agent / 多 Agent 绑定的 React → Tauri → Rust → SQLite 真实垂直链路；Rust 按 domain/application/ports/adapters/commands/bootstrap 分层；SQLite migration + 内置 Agent 幂等种子；事务化创建/修改/删除；`TauriDesktopApi` 生产适配器由 App 组合根选择；结构化错误（`DesktopError`）；62 个 Vitest 测试 + 30 个 Rust 测试 + 21 个 Playwright E2E；WebView2 CDP 自动化验证真实 invoke 链路（创建→读回→修改→删除→重启持久化）。
-- Phase 2.1：真实 Tauri UI 垂直链路验收（`pnpm test:tauri-ui`，通过 WebView2 CDP 操作真实页面 DOM 完成创建→读回→重启持久化→修改→删除→数据库清理）；adapter 标识 `data-desktop-adapter="tauri"`（仅开发模式）；真实错误路径（NOT_FOUND 显示、输入保留、无未捕获 rejection）；设置/提醒页"尚未实现"降级验证；SQLite `busy_timeout(5000)`、foreign_keys 每连接生效、migration 单事务原子性与并发测试；Rust 35 / Vitest 63 / Playwright 21 测试；真实 Tauri 截图 `artifacts/screenshots/phase-2.1/`（8 张）。
-- Phase 2.2：统一 Design System（Canvas/Surface/Text/Border/Accent/Danger 语义 Token、Radius/Shadow/字体/动效）；主窗口改轻量列表 + Inspector（标题直接编辑、正文无边框感、删除移入 overflow menu、dirty state 才显示保存/还原、干净态显示"已保存"）；Quick Note 浮动命令工具化（内容 + 至少一个 Agent 才可保存、柔和焦点、绑定行紧凑列表）；Settings shell（左侧导航 + 快捷键内容，未实现项以 disabled 占位）；Reminder/快捷键未启用时中性占位（"不提供预览"/"该能力将在系统功能启用后生效"）；空库统一 Empty Workspace；Lucide 图标替换字体 glyph；71 个 Vitest + 23 个 Playwright + 35 个 Rust 测试；真实 Tauri 截图 `artifacts/screenshots/phase-2.2/`（13 张）。
-- Phase 2.3：Home Experience Redesign——首页从 Sidebar+List+Inspector 改为"便签墙"：Toolbar（AgentTips / 搜索图标展开 / + 新建 / ··· 菜单），响应式 Tip Grid（3-4 列、固定高度 190px），低饱和 Pastel Palette（butter/peach/rose/lilac/sky/mint/sage/sand，Tip id FNV-1a 稳定映射），点击卡打开 Floating Note Editor（Dialog-like、pastel 便签底、dirty/clean、删除在 ··· 菜单），Agent/状态筛选在 Popover（active chip 可清除），Cmd/Ctrl+F 搜索，空库单一 Empty Workspace；设置降级为 ··· 菜单项；Quick Note 用 pastel 新便签底；75 个 Vitest + 23 个 Playwright + 35 个 Rust 测试；真实 Tauri 截图 `artifacts/screenshots/phase-2.3/`（13 张）。
-- Phase 2.4（Living Notes）：正式 10 色 Note Palette（lemon/apricot/coral/rose/lavender/periwinkle/sky/aqua/mint/sage，light 固定 hex + dark 固定映射，含 Palette 单元测试）；颜色从 stable-hash 改为**创建时随机分配（排除最近 2 种颜色）并持久化，且可在 Detailed Editor 中修改**（`note_color_suggest` / `tip_update_color`）；SQLite migration 0002（`color_key NOT NULL`、`used_at`）+ 旧 Tip 确定性 backfill；Quick Note 改为中性 canvas + 彩色 Note Surface（每次打开重新 suggest 颜色、textarea 透明）；首页 NoteCard WYSIWYG inline editing（标题/正文直编、650ms debounce autosave、blur flush、失败保留+重试、`tip_update_text` 只改文本）；AutoGrowTextarea + CSS Masonry（min 220/preferred 236/max 248 宽、初始 min-height 168、无截断、ResizeObserver + grid-auto-rows）；已使用生命周期（Mark Used 动画移除 + Toast + 5s Undo、独立 Used View + Restore、`tip_mark_used`/`tip_restore_used`、used 与 archived 分离）；Toolbar 简化为 Search/+/···（筛选在 ··· 子菜单）；86 个 Vitest + 24 个 Playwright + 43 个 Rust 测试；真实 Tauri UI 全链路 PASS；截图 `artifacts/screenshots/phase-2.4/`（12 张，20 条演示 Tip）。
-- Phase 2.4R（产品契约恢复）：定位并修复**颜色不显示的根因**——`bg-note-${color}` 动态 Tailwind 类未被 JIT 生成（构建 CSS 中无此类），改用显式静态 `NOTE_BG` 映射通过 style 属性渲染，并给 Note DOM 增加 `data-note-id`/`data-note-color`；E2E 断言 computed backgroundColor 精确属于 10 色 Palette（20 卡 ≥6 色、无白/无 #F5F7FA/无透明）；首页 4 列（`minmax(220px,1fr)` + padding 16 + gap 14，1000px 首行 ≥4 distinct x）；inline title/body 移除蓝色 Input ring（focus 无 outline/ring/box-shadow，整卡轻微 shadow）；Quick Note 外层 #F5F7FA + `.quick-note-paper`（720px/min-height 440/radius 16/彩色实底/textarea 透明），lemon 与 mint 循环重开至命中且截图像素 diff > 0（lemon #FFF0A6 与 mint #C7EFD4 各 14 万+ 像素）；删除 Detailed Editor 颜色选择器（第一版自动分配，保留底层 `updateTipColor`）；Editor max-height `min(680px,100vh-64px)`、正文区滚动、Agent/Footer 不被覆盖；Used View 截图含 6 张不同色已使用 Tip；新增 `scripts/check-note-colors.ps1` 做截图像素 Palette RGB 检测与真实 diff；autosave caret 不丢（Playwright ABC→900ms→DEF→ABCDEF 且焦点保持）；87 个 Vitest + 32 个 Playwright + 43 个 Rust 测试；全量门禁 PASS；截图 `artifacts/screenshots/phase-2.4R/`（12 张）。
+| 类型       | 当前内置识别目标             |
+| ---------- | ---------------------------- |
+| 桌面应用   | ChatGPT、Cursor、Trae        |
+| 终端 Agent | Codex、Claude Code、OpenCode |
 
-**尚未实现（后续 Phase）**：真实全局快捷键注册与设置持久化、多窗口生命周期、托盘、单实例、开机启动、Agent 检测、15 分钟冷却提醒、提醒运行时（`previewHotkey` / `getReminderPreview` 在 Tauri 端明确未实现）。
+识别依赖应用进程名、安装路径和终端命令特征。上游应用升级后，如果这些身份信息发生变化，可能需要同步更新 AgentTips 的识别规则。
 
 ## 快速开始
 
-```bash
-pnpm install
+### 环境要求
+
+- Windows
+- Node.js 与 pnpm
+- Rust stable（MSVC 工具链）
+- WebView2 Runtime
+
+### 从源码运行
+
+```powershell
+git clone https://github.com/lusblead/AgentTips.git
+Set-Location AgentTips
+pnpm install --frozen-lockfile
 pnpm tauri dev
 ```
 
-浏览器调试（无需 Tauri）：
+首次启动后：
 
-```bash
-pnpm dev
-# 打开 http://localhost:1420/?window=quick-note 等
+1. 按 `Ctrl + F12` 打开快捷便签。
+2. 写入正文，并按需添加标签、绑定 Agent、开启默认携带。
+3. 保存后可在主窗口继续搜索、编辑或标记为已使用。
+4. 在设置中可以修改全局快捷键和提醒冷却时间。
+
+如果默认快捷键被其他软件占用，请从主窗口菜单进入“设置”，重新录制一个 `Ctrl + 单键` 组合。切换失败时应用会保留原快捷键。
+
+## 构建 Windows 安装包
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm tauri build
 ```
 
-## 验收命令
+构建产物位于：
 
-```bash
+```text
+src-tauri/target/release/bundle/
+```
+
+## 数据与隐私
+
+- 正式数据保存在 `%APPDATA%\com.agenttips.app\agenttips.sqlite3`。
+- 当前实现没有云同步、账号系统、遥测或 LLM API 请求。
+- SQLite 文件未做额外的应用层加密，请不要保存密码、令牌或其他高敏感信息。
+- 备份数据库前建议先从系统托盘完全退出 AgentTips，避免复制到正在写入的数据库状态。
+
+## 本地开发
+
+只调试 React 界面时，可以使用浏览器 Mock 模式：
+
+```powershell
 pnpm install --frozen-lockfile
+pnpm dev
+```
+
+浏览器模式使用内存 Mock 数据，不代表真实 SQLite、全局快捷键或 Windows Agent 检测行为。原生能力请通过 `pnpm tauri dev` 验证。
+
+常用质量检查：
+
+```powershell
 pnpm format:check
 pnpm check:architecture
 pnpm lint
@@ -57,47 +107,37 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-一键全量门禁：
+Windows 原生运行链路还可以分别执行：
 
 ```powershell
-./scripts/acceptance.ps1
+pnpm test:windows-runtime
+pnpm test:global-hotkey
+pnpm test:desktop-detection
+pnpm test:terminal-detection
+pnpm test:reminder-runtime
 ```
 
-## 目录结构
+## 项目结构
 
 ```text
-src/
-├── desktop-api/          DesktopApi 契约、MockDesktopApi、窗口上下文适配器
-├── features/             功能模块（quick-note / note-library / reminder / hotkey-settings）
-├── components/
-│   ├── ui/               shadcn 风格基础组件
-│   └── shared/           feature 间复用组件
-├── lib/                  通用工具
-├── styles/               主题 token
-└── test/                 Vitest 架构静态检查
-e2e/                      Playwright 交互 / 截图 / 布局测试
-artifacts/screenshots/phase-1.5/  Phase 1.5 UI 截图
-src-tauri/
-├── src/{domain,application,ports,adapters,commands}/  Phase 2 业务实现
-├── migrations/           SQLite migration（0001_init.sql）
-└── capabilities/         最小权限（core:default）
-scripts/                  check-architecture.ps1、acceptance.ps1
-                          vertical-chain-verify.mjs（WebView2 CDP 真实链路验证）
-                          tauri-ui-vertical-chain.mjs（真实 UI 垂直链路验收）
-                          tauri-ui-screenshots.mjs（真实 Tauri UI 截图）
-                          tauri-ui-screenshots-22.mjs（Phase 2.2 真实 Tauri UI 截图）
-                          tauri-ui-screenshots-23.mjs（Phase 2.3 真实 Tauri UI 截图）
-                          tauri-ui-screenshots-24.mjs（Phase 2.4 真实 Tauri UI 截图）
-                          tauri-ui-screenshots-24r.mjs（Phase 2.4R 真实 Tauri UI 截图）
-                          check-note-colors.ps1（截图像素 Palette RGB 验收）
+src/                    React 界面、Desktop API 契约与适配器
+src-tauri/src/          Rust 领域、应用、端口、适配器和 Tauri Commands
+src-tauri/migrations/   SQLite 迁移
+e2e/                    Playwright 行为测试
+scripts/                架构检查与 Windows 运行验证
 ```
 
-## 已知限制
+## 当前边界
 
-- 浏览器模式全部数据来自 MockDesktopApi，重启即重置；Tauri 模式使用 `TauriDesktopApi` + SQLite（`%APPDATA%/com.agenttips.app/agenttips.sqlite3`）；
-- `previewHotkey` / `getReminderPreview` 在 Tauri 端明确未实现，设置页在 Tauri 模式下会提示；
-- 真实 Tauri UI 验收（`pnpm test:tauri-ui`）依赖 WebView2 与 Windows 环境，未纳入浏览器快速单元测试；
-- 当前为单窗口阶段，窗口路由统一由 URL 查询参数决定；Phase 3 多窗口后由 `window-context` 适配器合并 WebviewWindow label。
-- 浏览器模式下"关闭"快捷窗口依赖 `window.close()`，被浏览器限制时无效（Tauri 阶段由真实窗口生命周期接管）；
-- 截图与交互测试使用固定 Mock 数据与固定 viewport，无随机时间；
-- Rust 侧保持 Phase 0 骨架，未新增任何业务实现。
+- 当前只支持 Windows 原生运行。
+- 不提供云同步、跨设备同步、浏览器扩展或自动向 Agent 发送内容。
+- Agent 识别是基于本机进程身份的规则匹配，不是外部应用提供的稳定集成接口。
+- 当前没有签名发布包；从源码构建的安装包可能触发 Windows 安全提示。
+
+## 参与贡献
+
+欢迎通过 [Issues](https://github.com/lusblead/AgentTips/issues) 报告可复现问题或提出改进建议。提交 Pull Request 前，请至少运行与变更相关的前端测试、Rust 测试和构建检查，并避免提交本地数据库、运行日志或生成产物。
+
+## 许可证
+
+本仓库目前尚未附带开源许可证。在许可证明确之前，公开可见的源代码不代表已授予复制、修改或分发许可。

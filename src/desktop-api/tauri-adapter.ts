@@ -71,7 +71,6 @@ function toDesktopError(error: unknown): DesktopError {
 
 /**
  * Tauri 生产适配器。只允许本文件与 desktop-api 适配层调用 invoke。
- * 本阶段实现 Tip/Agent 真实链路；previewHotkey、getReminderPreview 明确未实现。
  */
 export class TauriDesktopApi implements DesktopApi {
   async listTips(query?: TipQuery): Promise<TipSummary[]> {
@@ -236,7 +235,7 @@ export class TauriDesktopApi implements DesktopApi {
   }
 
   async getSettings(): Promise<AppSettings> {
-    // 快捷键设置持久化属 Phase 3；本阶段返回默认值供页面渲染。
+    // 兼容旧 AppSettings 入口；快捷键与提醒设置使用各自的专用运行时 API。
     return { ...FALLBACK_SETTINGS, hotkey: { ...FALLBACK_SETTINGS.hotkey } };
   }
 

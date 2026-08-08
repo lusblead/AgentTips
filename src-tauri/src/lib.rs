@@ -188,8 +188,7 @@ pub fn run() {
             ));
             hotkey.startup()?;
 
-            // Desktop Agent Foreground Detection：
-            // 规则基于本机实测身份（docs/reports/phase-4a-desktop-agent-identities.md）
+            // Desktop Agent Foreground Detection：规则来自已验证的 Windows 进程身份。
             let detection_rules: Vec<DesktopAgentRule> = vec![
                 DesktopAgentRule {
                     agent_id: "cursor",

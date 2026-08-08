@@ -55,7 +55,7 @@ pub struct TipBinding {
     pub sort_order: i64,
 }
 
-/// Tip 领域模型（docs/03-domain-data-model.md）。
+/// Tip 领域模型。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tip {

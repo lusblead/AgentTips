@@ -16,7 +16,7 @@ export interface WindowContext {
   reminderDemo?: ReminderDemo;
   /** 主窗口初始 Agent 过滤（从提醒窗口"查看全部"进入时使用） */
   initialAgentId?: string;
-  /** 调试：使用空便签数据（主窗口空态截图） */
+  /** 调试：使用空便签数据。 */
   emptyData?: boolean;
 }
 

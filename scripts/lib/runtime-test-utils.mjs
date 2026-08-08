@@ -231,7 +231,7 @@ export function killProcessTree(rootPid) {
  *
  * 某些环境（远程会话 / 输入法 / 安全软件 / 系统合成输入策略）会过滤合成注入，
  * 导致 WM_HOTKEY 不送达。这是环境限制，不是 AgentTips 产品缺陷；
- * 全局热键真实行为由人工物理按键 smoke 覆盖（Phase 3B 已 PASS）。
+ * 全局热键真实行为由专用 Windows runtime test 与人工物理按键 smoke 覆盖。
  *
  * 返回 { available, reason? }。runtime 测试在 available=false 时
  * 对依赖合成热键的步骤输出 SKIP WITH REASON 而不是 FAIL。

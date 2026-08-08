@@ -9,7 +9,7 @@ function trackConsole(page: Page): string[] {
   return errors;
 }
 
-test.describe("Phase 1.5 交互流程", () => {
+test.describe("核心交互流程", () => {
   test("快捷窗口：输入并 Ctrl+Enter 保存后重置", async ({ page }) => {
     const errors = trackConsole(page);
     await page.goto("/?window=quick-note");

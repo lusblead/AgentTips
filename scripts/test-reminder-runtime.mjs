@@ -1,8 +1,8 @@
 /**
- * Phase 5 Reminder Runtime Test（真实 Windows）。
+ * Reminder Runtime Test（真实 Windows）。
  *
  * 使用 AGENTTIPS_TEST_DATA_DIR 隔离数据库，不触碰正式用户 DB。
- * 检测触发复用 Phase 4B terminal fixture（node + marker），无需修改真实 Codex/Claude。
+ * 检测触发复用 terminal fixture（node + marker），无需修改真实 Codex/Claude。
  *
  * 场景（需求 68-82）：
  *   A. Matched(codex) + Entered → Reminder 出现，含 Tip A 不含 Tip B

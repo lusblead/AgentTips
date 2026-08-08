@@ -1,4 +1,4 @@
-# Phase 4B-0 Terminal Process Topology Probe (read-only).
+# Terminal Process Topology Probe (read-only).
 #
 # Outputs sanitized identity markers only. Never prints full command lines,
 # full paths, prompts, or project names.

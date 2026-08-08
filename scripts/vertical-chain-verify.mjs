@@ -1,5 +1,5 @@
 /**
- * Phase 2 真实垂直链路验证：通过 WebView2 CDP 在 Tauri 窗口内调用
+ * 真实垂直链路验证：通过 WebView2 CDP 在 Tauri 窗口内调用
  * window.__TAURI_INTERNALS__.invoke，覆盖创建 → 查询 → 修改 → 删除。
  * 重启持久化由调用方（脚本外部）重启应用后再跑 phase:reload 部分。
  *

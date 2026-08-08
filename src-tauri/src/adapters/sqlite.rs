@@ -25,7 +25,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (5, include_str!("../../migrations/0005_tip_tags.sql")),
 ];
 
-/// 内置 Agent 初始名单（docs/03-domain-data-model.md）。
+/// 内置 Agent 初始名单。
 const BUILTIN_AGENTS: &[(&str, &str, AgentKind)] = &[
     ("chatgpt-desktop", "ChatGPT", AgentKind::Desktop),
     ("cursor", "Cursor", AgentKind::Desktop),
@@ -155,7 +155,7 @@ fn backfill_tip_colors(conn: &Connection) -> AppResult<()> {
 fn seed_builtin_agents(conn: &Connection) -> AppResult<()> {
     let now = Utc::now().to_rfc3339();
     for (key, name, kind) in BUILTIN_AGENTS {
-        // 稳定 ID（与 Phase 1 Mock 的 agent-* 不同；以数据库为准）
+        // 稳定 ID（与前端 Mock 的 agent-* 不同；以数据库为准）
         let id = builtin_agent_id(key);
         let inserted = conn
             .execute(

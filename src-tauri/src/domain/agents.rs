@@ -28,7 +28,7 @@ impl AgentKind {
     }
 }
 
-/// Agent 领域模型（docs/03-domain-data-model.md）。
+/// Agent 领域模型。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {

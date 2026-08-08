@@ -17,7 +17,7 @@ pub struct SqliteReminderStateRepository {
 }
 
 /// detection 侧 agent key → DB agents.key 归一化。
-/// Phase 4B 检测规则使用 "codex"，而 DB built-in key 为 "codex-cli"。
+/// 检测规则使用 "codex"，而 DB built-in key 为 "codex-cli"。
 fn normalize_agent_key(key: &str) -> &str {
     match key {
         "codex" => "codex-cli",
@@ -454,7 +454,7 @@ mod tests {
             false,
             false,
         );
-        // detection 侧 key 是 "codex"（Phase 4B），DB 侧是 "codex-cli"。
+        // detection 侧 key 是 "codex"，DB 侧是 "codex-cli"。
         let tips = eligibility.eligible_tips("codex").unwrap();
         assert_eq!(tips.len(), 1);
         assert_eq!(tips[0].body, "codex tip");

@@ -1,5 +1,5 @@
 /**
- * Phase 3A Windows Runtime Tests
+ * Windows Multi-window Runtime Tests
  *
  * 通过 WebView2 CDP 驱动真实 Tauri 多窗口，验证窗口生命周期：
  *   1. Main 启动

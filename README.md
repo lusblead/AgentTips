@@ -39,7 +39,7 @@ AgentTips 解决一个很具体的问题：使用多个 AI 编程工具时，重
 
 ### 安装发布版
 
-前往 [GitHub Releases](https://github.com/lusblead/AgentTips/releases/latest)，下载 Windows x64 的 `.exe`（NSIS，推荐）或 `.msi` 安装包。Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件的 SHA-256 摘要。
+前往 [GitHub Releases](https://github.com/lusblead/AgentTips/releases/latest) 下载对应系统架构的安装包：Windows x64 用户选择 `.exe`（NSIS，推荐）或 `.msi`，32 位 Windows 用户选择标有 `x86` 的 `.exe` 或 `.msi`。Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件的 SHA-256 摘要。
 
 当前安装包尚未进行代码签名，Windows 可能显示 Microsoft Defender SmartScreen 提示。请只从本仓库的 GitHub Releases 下载，并在继续安装前核对发布者、版本与摘要。
 
@@ -144,7 +144,7 @@ scripts/                架构检查与 Windows 运行验证
 
 ## 当前边界
 
-- 当前只支持 Windows 原生运行。
+- 当前只支持 Windows 原生运行；Release 提供 x86 与 x64 安装包，暂不提供 ARM64 安装包。
 - 不提供云同步、跨设备同步、浏览器扩展或自动向 Agent 发送内容。
 - Agent 识别是基于本机进程身份的规则匹配，不是外部应用提供的稳定集成接口。
 - 当前没有代码签名证书；GitHub Release 和源码构建的安装包都可能触发 Windows 安全提示。

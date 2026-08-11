@@ -10,6 +10,8 @@ pub const DEFAULT_COOLDOWN_MINUTES: i64 = 15;
 /// 冷却可配置范围：1 ～ 120 分钟（0 不允许表示 disabled）。
 pub const MIN_COOLDOWN_MINUTES: i64 = 1;
 pub const MAX_COOLDOWN_MINUTES: i64 = 120;
+/// Reminder 窗口提供的固定稍后提醒时长（小时）。
+pub const SNOOZE_HOUR_OPTIONS: [i64; 5] = [1, 2, 4, 8, 24];
 
 /// Reminder 全局设置（id=1 单行）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +19,14 @@ pub const MAX_COOLDOWN_MINUTES: i64 = 120;
 pub struct ReminderSettings {
     pub cooldown_minutes: i64,
     pub updated_at: DateTime<Utc>,
+}
+
+/// 成功暂停当前 Agent 提醒后的稳定返回值。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderSnoozeResult {
+    pub agent_key: String,
+    pub snoozed_until: DateTime<Utc>,
 }
 
 /// 冷却时长校验：1 ～ 120 分钟。
@@ -28,6 +38,24 @@ pub fn validate_cooldown_minutes(minutes: i64) -> AppResult<i64> {
         )));
     }
     Ok(minutes)
+}
+
+/// 稍后提醒只接受 UI 明示的固定小时选项，避免任意长时间误关闭提醒。
+pub fn validate_snooze_hours(hours: i64) -> AppResult<i64> {
+    if !SNOOZE_HOUR_OPTIONS.contains(&hours) {
+        return Err(AppError::Validation(
+            "稍后提醒时长必须是 1、2、4、8 或 24 小时".into(),
+        ));
+    }
+    Ok(hours)
+}
+
+/// 返回暂停剩余秒数；缺失或已到期均返回 0。
+pub fn snooze_remaining_secs(snoozed_until: Option<DateTime<Utc>>, now: DateTime<Utc>) -> i64 {
+    snoozed_until
+        .filter(|until| *until > now)
+        .map(|until| (until - now).num_seconds().max(1))
+        .unwrap_or(0)
 }
 
 /// Reminder 单条便签内容（只含用户自己保存的 Tip 内容 + 颜色）。
@@ -57,6 +85,7 @@ pub struct ReminderPayload {
 pub enum ReminderDecision {
     Show { payload: ReminderPayload },
     SkipNoEligibleTips,
+    SkipSnoozed { remaining_secs: i64 },
     SkipCooldown { remaining_secs: i64 },
     SkipNotActionable,
     SkipAlreadyVisible,
@@ -123,6 +152,29 @@ mod tests {
     #[test]
     fn default_15min_valid() {
         assert_eq!(validate_cooldown_minutes(15).unwrap(), 15);
+    }
+
+    #[test]
+    fn validates_supported_snooze_hours() {
+        for hours in SNOOZE_HOUR_OPTIONS {
+            assert_eq!(validate_snooze_hours(hours).unwrap(), hours);
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_snooze_hours() {
+        for hours in [-1, 0, 3, 12, 25] {
+            assert!(validate_snooze_hours(hours).is_err());
+        }
+    }
+
+    #[test]
+    fn snooze_remaining_is_positive_only_before_expiry() {
+        let now = at(1_000);
+        assert_eq!(snooze_remaining_secs(Some(at(1_060)), now), 60);
+        assert_eq!(snooze_remaining_secs(Some(now), now), 0);
+        assert_eq!(snooze_remaining_secs(Some(at(999)), now), 0);
+        assert_eq!(snooze_remaining_secs(None, now), 0);
     }
 
     #[test]

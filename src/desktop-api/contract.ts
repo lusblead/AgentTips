@@ -85,6 +85,7 @@ export interface Agent {
   key: string;
   name: string;
   kind: AgentKind;
+  enabled: boolean;
   reminderEnabled: boolean;
 }
 
@@ -154,6 +155,11 @@ export interface ReminderPayloadDto {
 export interface ReminderSettings {
   cooldownMinutes: number;
   updatedAt: string;
+}
+
+export interface ReminderSnoozeResult {
+  agentKey: string;
+  snoozedUntil: string;
 }
 
 /** 快捷窗口每次显示前由后端发出的重置事件（新 Draft Session）。 */
@@ -234,6 +240,8 @@ export interface DesktopApi {
   getWindowKind(): Promise<WindowKind>;
 
   listAgents(): Promise<Agent[]>;
+  /** 启用/停用本安装使用的 Agent；不会删除既有 Tip 绑定。 */
+  updateAgentEnabled(agentId: string, enabled: boolean): Promise<Agent>;
   getSettings(): Promise<AppSettings>;
   previewHotkey(input: HotkeyCandidate): Promise<HotkeyPreviewResult>;
   getHotkeySettings(): Promise<HotkeyRuntimeState>;
@@ -246,6 +254,14 @@ export interface DesktopApi {
   updateReminderSettings(cooldownMinutes: number): Promise<ReminderSettings>;
   /** 隐藏/忽略当前 Reminder（不更新 cooldown）。 */
   dismissReminder(): Promise<void>;
+  /** 按当前 Agent 暂停提醒；只接受 1/2/4/8/24 小时。 */
+  snoozeReminder(hours: number): Promise<ReminderSnoozeResult>;
+  /** 列出仍在暂停期内的 Agent 提醒状态。 */
+  getAgentReminderSnoozes(): Promise<ReminderSnoozeResult[]>;
+  /** 从设置页直接暂停指定 Agent，不依赖当前提醒窗口。 */
+  snoozeAgentReminders(agentKey: string, hours: number): Promise<ReminderSnoozeResult>;
+  /** 只恢复指定 Agent 的提醒。 */
+  resumeAgentReminders(agentKey: string): Promise<void>;
   /** Reminder 窗口加载兜底：拉取最近一次成功展示的 payload。 */
   getCurrentReminderPayload(): Promise<ReminderPayloadDto | null>;
   /** 订阅 Reminder 展示事件（payload 出现/替换）。 */

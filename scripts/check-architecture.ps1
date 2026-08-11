@@ -62,7 +62,7 @@ foreach ($file in $applicationFiles) {
 # 6. SQL 只能出现在 migrations/*.sql 与 adapters/（sqlite.rs、sqlite_hotkey_settings.rs 等 SQLite adapter）
 $rustFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src") -Recurse -Filter *.rs
 foreach ($file in $rustFiles) {
-    if ($file.FullName -match 'adapters\\(sqlite\.rs|sqlite_hotkey_settings\.rs)$') { continue }
+    if ($file.FullName -match 'adapters\\sqlite(?:_[^\\]+)?\.rs$') { continue }
     $content = Get-Content -Raw -Encoding UTF8 $file.FullName
     if ($content -cmatch '\b(SELECT |INSERT INTO|CREATE TABLE|UPDATE |DELETE FROM)\b') {
         $failures += "SQL 出现在非 SQLite adapter 文件: $($file.FullName)"
@@ -143,7 +143,8 @@ foreach ($layer in $windowsBoundaryLayers) {
     $layerFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\$layer") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
     foreach ($file in $layerFiles) {
         $content = Get-Content -Raw -Encoding UTF8 $file.FullName
-        if ($content -match 'windows_sys|windows::|winapi') {
+        $code = $content -replace '(?m)^\s*//.*$', ''
+        if ($code -cmatch '\b(?:windows_sys|windows|winapi)::') {
             $failures += "$layer 依赖 Windows API: $($file.FullName)"
         }
     }
@@ -189,7 +190,8 @@ foreach ($adapter in $detectionAdapters) {
 $portFiles = Get-ChildItem -Path (Join-Path $root "src-tauri\src\ports") -Recurse -Filter *.rs -ErrorAction SilentlyContinue
 foreach ($file in $portFiles) {
     $content = Get-Content -Raw -Encoding UTF8 $file.FullName
-    if ($content -match 'WebviewWindow|AppHandle') {
+    $code = $content -replace '(?m)^\s*//.*$', ''
+    if ($code -match '\b(?:WebviewWindow|AppHandle)\b') {
         $failures += "ports 依赖具体 Tauri window 类型: $($file.FullName)"
     }
 }

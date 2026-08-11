@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{Emitter, Manager, WindowEvent};
 
 use crate::domain::detection::DesktopAgentRule;
@@ -33,13 +34,15 @@ use application::terminal::{
 };
 use application::tips::TipService;
 use application::windows::WindowApplicationService;
-use commands::agents::agent_list;
+use commands::agents::{agent_list, agent_update_enabled};
 use commands::detection::desktop_detection_get_current;
 use commands::hotkey::{
     hotkey_get, hotkey_preview, hotkey_recording_begin, hotkey_recording_end, hotkey_update,
 };
 use commands::reminder::{
-    reminder_dismiss, reminder_get_current_payload, reminder_settings_get, reminder_settings_update,
+    reminder_dismiss, reminder_get_current_payload, reminder_list_agent_snoozes,
+    reminder_resume_agent, reminder_settings_get, reminder_settings_update, reminder_snooze,
+    reminder_snooze_agent,
 };
 use commands::tips::{
     note_color_suggest, tag_list, tip_create, tip_delete, tip_get, tip_list, tip_mark_used,
@@ -80,6 +83,10 @@ enum QuickNoteCloseAction {
     HideWindow(WindowLabel),
     RequestDraftConfirmation,
     PreventClose,
+}
+
+fn should_open_main_from_tray_event(button: MouseButton, button_state: MouseButtonState) -> bool {
+    button == MouseButton::Left && button_state == MouseButtonState::Up
 }
 
 fn quick_note_close_action(is_quitting: bool, label: Option<WindowLabel>) -> QuickNoteCloseAction {
@@ -284,7 +291,22 @@ pub fn run() {
             let tray = tauri::tray::TrayIconBuilder::with_id("agenttips-tray")
                 .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&menu)
-                .show_menu_on_left_click(true)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = event
+                    {
+                        if should_open_main_from_tray_event(button, button_state) {
+                            let state = tray.app_handle().state::<AppState>();
+                            if let Err(err) = state.windows.open_main() {
+                                eprintln!("[agenttips] tray_open_main_failed err={err}");
+                            }
+                        }
+                    }
+                })
                 .on_menu_event(move |app, event| {
                     let state = app.state::<AppState>();
                     match event.id().as_ref() {
@@ -331,6 +353,7 @@ pub fn run() {
             tip_restore_used,
             tip_update_color,
             agent_list,
+            agent_update_enabled,
             desktop_detection_get_current,
             hotkey_get,
             hotkey_preview,
@@ -346,6 +369,10 @@ pub fn run() {
             reminder_settings_get,
             reminder_settings_update,
             reminder_dismiss,
+            reminder_snooze,
+            reminder_list_agent_snoozes,
+            reminder_snooze_agent,
+            reminder_resume_agent,
             reminder_get_current_payload
         ])
         .run(tauri::generate_context!())
@@ -370,5 +397,29 @@ mod window_event_policy_tests {
             quick_note_close_action(true, Some(WindowLabel::QuickNote)),
             QuickNoteCloseAction::AllowClose
         );
+    }
+
+    #[test]
+    fn tray_left_release_opens_main_policy() {
+        assert!(should_open_main_from_tray_event(
+            MouseButton::Left,
+            MouseButtonState::Up
+        ));
+    }
+
+    #[test]
+    fn tray_non_left_release_does_not_open_main() {
+        assert!(!should_open_main_from_tray_event(
+            MouseButton::Left,
+            MouseButtonState::Down
+        ));
+        assert!(!should_open_main_from_tray_event(
+            MouseButton::Right,
+            MouseButtonState::Up
+        ));
+        assert!(!should_open_main_from_tray_event(
+            MouseButton::Middle,
+            MouseButtonState::Up
+        ));
     }
 }

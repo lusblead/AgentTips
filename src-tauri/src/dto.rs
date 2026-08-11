@@ -108,6 +108,7 @@ pub struct AgentDto {
     pub key: String,
     pub name: String,
     pub kind: AgentKind,
+    pub enabled: bool,
     pub reminder_enabled: bool,
 }
 
@@ -159,6 +160,7 @@ impl From<&Agent> for AgentDto {
             key: agent.key.clone(),
             name: agent.name.clone(),
             kind: agent.kind,
+            enabled: agent.enabled,
             reminder_enabled: agent.reminder_enabled,
         }
     }

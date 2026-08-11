@@ -23,6 +23,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         include_str!("../../migrations/0004_reminder_runtime.sql"),
     ),
     (5, include_str!("../../migrations/0005_tip_tags.sql")),
+    (6, include_str!("../../migrations/0006_agent_snooze.sql")),
 ];
 
 /// 内置 Agent 初始名单。
@@ -688,6 +689,27 @@ impl AgentRepository for SqliteDatabase {
         }
         Ok(agents)
     }
+
+    fn set_enabled(&self, id: Uuid, enabled: bool) -> AppResult<Agent> {
+        let conn = self.conn.lock().unwrap();
+        let updated_at = rfc(Utc::now());
+        let affected = conn
+            .execute(
+                "UPDATE agents SET enabled = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id.to_string(), enabled as i64, updated_at],
+            )
+            .map_err(AppError::from)?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("Agent {} 不存在", id)));
+        }
+        conn.query_row(
+            "SELECT id, key, name, kind, built_in, enabled, reminder_enabled, created_at, updated_at
+             FROM agents WHERE id = ?1",
+            params![id.to_string()],
+            agent_from_row,
+        )
+        .map_err(AppError::from)
+    }
 }
 
 #[cfg(test)]
@@ -799,7 +821,50 @@ mod tests {
                 .map_err(AppError::from)
             })
             .unwrap();
-        assert_eq!(versions, 5);
+        assert_eq!(versions, 6);
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn migration_6_preserves_existing_reminder_state() {
+        let path = temp_db_path("snooze-upgrade");
+        let agent_id = Uuid::new_v4();
+        let last_shown_at = "2026-08-09T12:00:00+00:00";
+        {
+            let conn = Connection::open(&path).unwrap();
+            for (version, sql) in MIGRATIONS.iter().take(5) {
+                apply_migration(&conn, *version, sql).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO agents
+                    (id, key, name, kind, built_in, enabled, reminder_enabled, created_at, updated_at)
+                 VALUES (?1, 'upgrade-agent', 'Upgrade Agent', 'terminal', 0, 1, 1, ?2, ?2)",
+                params![agent_id.to_string(), last_shown_at],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO agent_reminder_state (agent_id, last_shown_at, updated_at)
+                 VALUES (?1, ?2, ?2)",
+                params![agent_id.to_string(), last_shown_at],
+            )
+            .unwrap();
+        }
+
+        let db = SqliteDatabase::open(&path).unwrap();
+        let (stored_last_shown, snoozed_until): (Option<String>, Option<String>) = db
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT last_shown_at, snoozed_until
+                     FROM agent_reminder_state WHERE agent_id = ?1",
+                    params![agent_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(AppError::from)
+            })
+            .unwrap();
+        assert_eq!(stored_last_shown.as_deref(), Some(last_shown_at));
+        assert_eq!(snoozed_until, None);
         drop(db);
         let _ = std::fs::remove_file(&path);
     }
@@ -1007,6 +1072,49 @@ mod tests {
         let agents = builtin_agents();
         let (agent_a, agent_b) = agent_ids(&agents);
         (SqliteDatabase::open_in_memory().unwrap(), agent_a, agent_b)
+    }
+
+    #[test]
+    fn set_enabled_updates_known_agent() {
+        let db = SqliteDatabase::open_in_memory().unwrap();
+        let agent = AgentRepository::list(&db)
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.key == "cursor")
+            .unwrap();
+
+        let disabled = AgentRepository::set_enabled(&db, agent.id, false).unwrap();
+        assert!(!disabled.enabled);
+        let enabled = AgentRepository::set_enabled(&db, agent.id, true).unwrap();
+        assert!(enabled.enabled);
+    }
+
+    #[test]
+    fn set_enabled_rejects_unrecognized_agent() {
+        let db = SqliteDatabase::open_in_memory().unwrap();
+        assert!(AgentRepository::set_enabled(&db, Uuid::new_v4(), false).is_err());
+        assert!(AgentRepository::list(&db)
+            .unwrap()
+            .into_iter()
+            .all(|agent| agent.enabled));
+    }
+
+    #[test]
+    fn disabling_agent_preserves_existing_bindings() {
+        let (db, agent_a, _) = setup_repo();
+        let tip = sample_tip(
+            Uuid::new_v4(),
+            None,
+            "保留历史绑定",
+            &[binding(agent_a, true, 0)],
+        );
+        let created = db.create_with_bindings(&tip, &tip.bindings).unwrap();
+
+        AgentRepository::set_enabled(&db, agent_a, false).unwrap();
+
+        let read = db.get(created.id).unwrap().unwrap();
+        assert_eq!(read.bindings.len(), 1);
+        assert_eq!(read.bindings[0].agent_id, agent_a);
     }
 
     #[test]

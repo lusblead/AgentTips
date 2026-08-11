@@ -18,6 +18,7 @@ import {
   type QuickNoteResetPayload,
   type ReminderPayloadDto,
   type ReminderSettings,
+  type ReminderSnoozeResult,
   type TipDetail,
   type TipQuery,
   type TipSummary,
@@ -234,6 +235,14 @@ export class TauriDesktopApi implements DesktopApi {
     }
   }
 
+  async updateAgentEnabled(agentId: string, enabled: boolean): Promise<Agent> {
+    try {
+      return await invoke<Agent>("agent_update_enabled", { agentId, enabled });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
   async getSettings(): Promise<AppSettings> {
     // 兼容旧 AppSettings 入口；快捷键与提醒设置使用各自的专用运行时 API。
     return { ...FALLBACK_SETTINGS, hotkey: { ...FALLBACK_SETTINGS.hotkey } };
@@ -314,6 +323,41 @@ export class TauriDesktopApi implements DesktopApi {
   async dismissReminder(): Promise<void> {
     try {
       await invoke<void>("reminder_dismiss");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async snoozeReminder(hours: number): Promise<ReminderSnoozeResult> {
+    try {
+      return await invoke<ReminderSnoozeResult>("reminder_snooze", { hours });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async getAgentReminderSnoozes(): Promise<ReminderSnoozeResult[]> {
+    try {
+      return await invoke<ReminderSnoozeResult[]>("reminder_list_agent_snoozes");
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async snoozeAgentReminders(agentKey: string, hours: number): Promise<ReminderSnoozeResult> {
+    try {
+      return await invoke<ReminderSnoozeResult>("reminder_snooze_agent", {
+        agentKey,
+        hours,
+      });
+    } catch (error) {
+      throw toDesktopError(error);
+    }
+  }
+
+  async resumeAgentReminders(agentKey: string): Promise<void> {
+    try {
+      await invoke<void>("reminder_resume_agent", { agentKey });
     } catch (error) {
       throw toDesktopError(error);
     }

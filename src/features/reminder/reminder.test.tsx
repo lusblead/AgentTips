@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import ReminderWindow, { formatCopyAll } from ".";
@@ -107,6 +107,35 @@ describe("Agent 提醒窗口（真实 payload 事件驱动）", () => {
     await user.click(screen.getByRole("button", { name: "本次忽略" }));
     expect(container.firstChild).toBeNull();
     expect(dismissSpy).toHaveBeenCalled();
+  });
+
+  it("选择 4 小时后只暂停当前 Agent 并隐藏提醒", async () => {
+    const api = new MockDesktopApi();
+    const user = userEvent.setup();
+    const { container } = render(<ReminderWindow api={api} />);
+    api.emitReminder(THREE_TIPS);
+    await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("button", { name: "稍后提醒" }));
+    await user.click(await screen.findByRole("menuitem", { name: "4 小时" }));
+
+    await waitFor(() => expect(container.firstChild).toBeNull());
+    expect(api.reminderSnoozeCalls).toEqual([4]);
+  });
+
+  it("暂停写入失败时提醒保持可见", async () => {
+    const api = new MockDesktopApi();
+    vi.spyOn(api, "snoozeReminder").mockRejectedValue(new Error("数据库错误"));
+    const user = userEvent.setup();
+    render(<ReminderWindow api={api} />);
+    api.emitReminder(THREE_TIPS);
+    await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("button", { name: "稍后提醒" }));
+    await user.click(await screen.findByRole("menuitem", { name: "4 小时" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("数据库错误");
+    expect(screen.getByRole("dialog", { name: "Cursor 提醒" })).toBeInTheDocument();
   });
 
   it("打开 AgentTips 回调携带当前 Agent", async () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BellOff, Check, ChevronDown, ChevronUp, Copy, ExternalLink, X } from "lucide-react";
+import { AgentSnoozeMenu } from "@/components/shared/AgentSnoozeMenu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -68,7 +69,9 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
   );
   const [collapsed, setCollapsed] = useState(demo === "collapsed");
   const [dismissed, setDismissed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [snoozing, setSnoozing] = useState(false);
   const [copiedTipId, setCopiedTipId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
@@ -87,10 +90,11 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
           setPayload(next);
           setDismissed(false);
           setCollapsed(false);
-          setError(null);
+          setLoadError(null);
+          setActionError(null);
         });
       } catch (err) {
-        if (!cancelled) setError(desktopErrorMessage(err));
+        if (!cancelled) setLoadError(desktopErrorMessage(err));
       }
       try {
         const current = await api.getCurrentReminderPayload();
@@ -116,11 +120,28 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
     }
   }, []);
 
+  const handleSnooze = useCallback(
+    async (hours: number) => {
+      setSnoozing(true);
+      setActionError(null);
+      try {
+        await api.snoozeReminder(hours);
+        setDismissed(true);
+      } catch (err) {
+        setActionError(desktopErrorMessage(err));
+        setCollapsed(false);
+      } finally {
+        setSnoozing(false);
+      }
+    },
+    [api],
+  );
+
   if (dismissed) {
     return null;
   }
 
-  if (error) {
+  if (loadError) {
     return (
       <div
         className="flex h-screen items-center justify-center bg-surface-canvas p-4 text-text-primary"
@@ -128,7 +149,7 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
         data-state="error"
       >
         <p className="text-secondary-size text-danger" role="alert">
-          提醒加载失败：{error}
+          提醒加载失败：{loadError}
         </p>
       </div>
     );
@@ -190,6 +211,11 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
               >
                 <ChevronDown className="h-4 w-4" />
               </Button>
+              <AgentSnoozeMenu
+                compact
+                pending={snoozing}
+                onSelect={(hours) => void handleSnooze(hours)}
+              />
               <Button
                 variant="ghost"
                 size="icon"
@@ -299,7 +325,13 @@ export default function ReminderWindow({ api, demo, onOpenMain }: ReminderWindow
           )}
         </CardContent>
         <div className="shrink-0 border-t border-border-subtle px-4 py-2">
+          {actionError && (
+            <p className="mb-2 text-secondary-size text-danger" role="alert">
+              暂停提醒失败：{actionError}
+            </p>
+          )}
           <div className="flex items-center gap-2">
+            <AgentSnoozeMenu pending={snoozing} onSelect={(hours) => void handleSnooze(hours)} />
             <Button
               variant="outline"
               size="sm"

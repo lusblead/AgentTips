@@ -239,6 +239,37 @@ describe("主管理窗口（Living Notes）", () => {
     expect(screen.getByTestId("tip-grid")).toBeInTheDocument();
   });
 
+  it("停用的 Agent 不出现在新的筛选列表", async () => {
+    const api = new MockDesktopApi();
+    const claude = (await api.listAgents()).find((agent) => agent.key === "claude-code")!;
+    await api.updateAgentEnabled(claude.id, false);
+    const { user } = await renderLibrary(api);
+
+    await openFilters(user);
+
+    expect(screen.queryByRole("checkbox", { name: "筛选 Claude Code" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "筛选 Cursor" })).toBeInTheDocument();
+  });
+
+  it("已选 Agent 停用并刷新后清除对应筛选", async () => {
+    const api = new MockDesktopApi();
+    const cursor = (await api.listAgents()).find((agent) => agent.key === "cursor")!;
+    const { user } = await renderLibrary(api);
+    await openFilters(user);
+    fireEvent.click((await screen.findByRole("checkbox", { name: "筛选 Cursor" })).closest("div")!);
+    await user.keyboard("{Escape}{Escape}");
+    expect(screen.getByRole("button", { name: "清除 Cursor 筛选" })).toBeInTheDocument();
+    expect(tipCardByTitle("完成后运行全部测试")).toBeUndefined();
+
+    await api.updateAgentEnabled(cursor.id, false);
+    fireEvent.focus(window);
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "清除 Cursor 筛选" })).not.toBeInTheDocument(),
+    );
+    expect(tipCardByTitle("完成后运行全部测试")).toBeDefined();
+  });
+
   it("Search 后 Grid 正确", async () => {
     const api = new MockDesktopApi();
     const { user } = await renderLibrary(api);

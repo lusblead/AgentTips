@@ -15,6 +15,7 @@ import type {
   QuickNoteResetPayload,
   ReminderPayloadDto,
   ReminderSettings,
+  ReminderSnoozeResult,
   ReminderTipDto,
   TipDetail,
   TipBindingDto,
@@ -147,15 +148,31 @@ const SEED_AGENTS: Agent[] = [
     key: "chatgpt-desktop",
     name: "ChatGPT",
     kind: "desktop",
+    enabled: true,
     reminderEnabled: true,
   },
-  { id: AGENT_IDS.cursor, key: "cursor", name: "Cursor", kind: "desktop", reminderEnabled: true },
-  { id: AGENT_IDS.trae, key: "trae", name: "Trae", kind: "desktop", reminderEnabled: true },
+  {
+    id: AGENT_IDS.cursor,
+    key: "cursor",
+    name: "Cursor",
+    kind: "desktop",
+    enabled: true,
+    reminderEnabled: true,
+  },
+  {
+    id: AGENT_IDS.trae,
+    key: "trae",
+    name: "Trae",
+    kind: "desktop",
+    enabled: true,
+    reminderEnabled: true,
+  },
   {
     id: AGENT_IDS.claudeCode,
     key: "claude-code",
     name: "Claude Code",
     kind: "terminal",
+    enabled: true,
     reminderEnabled: true,
   },
   {
@@ -163,9 +180,17 @@ const SEED_AGENTS: Agent[] = [
     key: "opencode",
     name: "OpenCode",
     kind: "terminal",
+    enabled: true,
     reminderEnabled: true,
   },
-  { id: AGENT_IDS.codex, key: "codex-cli", name: "Codex", kind: "terminal", reminderEnabled: true },
+  {
+    id: AGENT_IDS.codex,
+    key: "codex-cli",
+    name: "Codex",
+    kind: "terminal",
+    enabled: true,
+    reminderEnabled: true,
+  },
 ];
 
 const FIXED_NOW = "2026-08-06T12:00:00.000Z";
@@ -468,6 +493,7 @@ export class MockDesktopApi implements DesktopApi {
   private tips: SeedTip[];
   private settings: AppSettings;
   private reminderSettings: ReminderSettings;
+  private agentReminderSnoozes: Map<string, string>;
   private currentReminderPayload: ReminderPayloadDto | null;
   private reminderShowListeners: Array<(payload: ReminderPayloadDto) => void>;
   private failures: Record<MockFailureKind, boolean> = {
@@ -478,6 +504,9 @@ export class MockDesktopApi implements DesktopApi {
   private saveDelayMs = 0;
   windowCalls: string[] = [];
   hotkeyCalls: string[] = [];
+  reminderSnoozeCalls: number[] = [];
+  agentReminderSnoozeCalls: Array<{ agentKey: string; hours: number }> = [];
+  agentReminderResumeCalls: string[] = [];
   private listeners: {
     quickNoteReset: Array<(payload: QuickNoteResetPayload) => void>;
     quickNoteCloseRequested: Array<(payload: QuickNoteCloseRequestedPayload) => void>;
@@ -508,6 +537,7 @@ export class MockDesktopApi implements DesktopApi {
       cooldownMinutes: 15,
       updatedAt: FIXED_NOW,
     };
+    this.agentReminderSnoozes = new Map();
     this.currentReminderPayload = null;
     this.reminderShowListeners = [];
   }
@@ -757,6 +787,15 @@ export class MockDesktopApi implements DesktopApi {
     return this.agents.map((agent) => ({ ...agent }));
   }
 
+  async updateAgentEnabled(agentId: string, enabled: boolean): Promise<Agent> {
+    const index = this.agents.findIndex((agent) => agent.id === agentId);
+    if (index < 0) {
+      throw Object.assign(new Error("Agent 不存在"), { code: "NOT_FOUND" });
+    }
+    this.agents[index] = { ...this.agents[index], enabled };
+    return { ...this.agents[index] };
+  }
+
   async getSettings(): Promise<AppSettings> {
     return {
       ...this.settings,
@@ -860,6 +899,52 @@ export class MockDesktopApi implements DesktopApi {
     return undefined;
   }
 
+  async snoozeReminder(hours: number): Promise<ReminderSnoozeResult> {
+    if (![1, 2, 4, 8, 24].includes(hours)) {
+      throw Object.assign(new Error("稍后提醒时长必须是 1、2、4、8 或 24 小时"), {
+        code: "VALIDATION_ERROR",
+      });
+    }
+    if (!this.currentReminderPayload) {
+      throw Object.assign(new Error("当前没有可暂停的提醒"), { code: "VALIDATION_ERROR" });
+    }
+    const payload = this.currentReminderPayload;
+    const result = await this.snoozeAgentReminders(payload.agentKey, hours);
+    this.reminderSnoozeCalls.push(hours);
+    this.currentReminderPayload = null;
+    return result;
+  }
+
+  async getAgentReminderSnoozes(): Promise<ReminderSnoozeResult[]> {
+    return [...this.agentReminderSnoozes.entries()].map(([agentKey, snoozedUntil]) => ({
+      agentKey,
+      snoozedUntil,
+    }));
+  }
+
+  async snoozeAgentReminders(agentKey: string, hours: number): Promise<ReminderSnoozeResult> {
+    if (![1, 2, 4, 8, 24].includes(hours)) {
+      throw Object.assign(new Error("稍后提醒时长必须是 1、2、4、8 或 24 小时"), {
+        code: "VALIDATION_ERROR",
+      });
+    }
+    if (!this.agents.some((agent) => agent.key === agentKey)) {
+      throw Object.assign(new Error("Agent 不存在"), { code: "NOT_FOUND" });
+    }
+    const snoozedUntil = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    this.agentReminderSnoozes.set(agentKey, snoozedUntil);
+    this.agentReminderSnoozeCalls.push({ agentKey, hours });
+    return { agentKey, snoozedUntil };
+  }
+
+  async resumeAgentReminders(agentKey: string): Promise<void> {
+    if (!this.agents.some((agent) => agent.key === agentKey)) {
+      throw Object.assign(new Error("Agent 不存在"), { code: "NOT_FOUND" });
+    }
+    this.agentReminderSnoozes.delete(agentKey);
+    this.agentReminderResumeCalls.push(agentKey);
+  }
+
   async getCurrentReminderPayload(): Promise<ReminderPayloadDto | null> {
     return this.currentReminderPayload ? clonePayload(this.currentReminderPayload) : null;
   }
@@ -908,11 +993,15 @@ export class MockDesktopApi implements DesktopApi {
       cooldownMinutes: 15,
       updatedAt: FIXED_NOW,
     };
+    this.agentReminderSnoozes = new Map();
     this.currentReminderPayload = null;
     this.reminderShowListeners = [];
     this.failures = { save: false, delete: false, hotkey: false };
     this.saveDelayMs = 0;
     this.windowCalls = [];
+    this.reminderSnoozeCalls = [];
+    this.agentReminderSnoozeCalls = [];
+    this.agentReminderResumeCalls = [];
   }
 }
 

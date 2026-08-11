@@ -91,6 +91,18 @@ describe("快捷新建窗口", () => {
     );
   });
 
+  it("disabled_agents_are_not_offered_for_new_bindings", async () => {
+    const api = new MockDesktopApi();
+    const claude = (await api.listAgents()).find((agent) => agent.key === "claude-code")!;
+    await api.updateAgentEnabled(claude.id, false);
+    const { user } = await renderQuickNote(api);
+
+    await user.click(screen.getByRole("button", { name: /添加 Agent/ }));
+
+    expect(screen.queryByRole("menuitem", { name: /Claude Code/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Cursor/ })).toBeInTheDocument();
+  });
+
   it("submits and persists no title", async () => {
     const api = new MockDesktopApi();
     const createSpy = vi.spyOn(api, "createTip");

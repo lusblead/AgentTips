@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::detection::{DetectionResult, Transition};
 use crate::domain::reminder::{
-    check_cooldown, ReminderDecision, ReminderPayload, ReminderSettings,
+    check_cooldown, snooze_remaining_secs, validate_snooze_hours, ReminderDecision,
+    ReminderPayload, ReminderSettings, ReminderSnoozeResult,
 };
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::ports::clock::Clock;
 use crate::ports::reminder::{
     ReminderEligibilityPort, ReminderPresenterPort, ReminderStateRepositoryPort,
@@ -72,6 +73,59 @@ impl ReminderCoordinator {
         Ok(())
     }
 
+    /// 将指定 Agent 的提醒独立暂停；可由 Settings 直接调用，不依赖当前提醒窗口。
+    pub fn snooze_agent(&self, agent_key: &str, hours: i64) -> AppResult<ReminderSnoozeResult> {
+        let hours = validate_snooze_hours(hours)?;
+        let snoozed_until = self.clock.now_utc() + Duration::hours(hours);
+        self.state_repo
+            .set_snoozed_until(agent_key, Some(snoozed_until))?;
+        eprintln!(
+            "[agenttips] reminder_snoozed agent_id={} hours={} until={}",
+            agent_key,
+            hours,
+            snoozed_until.to_rfc3339()
+        );
+        Ok(ReminderSnoozeResult {
+            agent_key: agent_key.to_string(),
+            snoozed_until,
+        })
+    }
+
+    /// 将当前可见提醒按 Agent 独立暂停；必须先持久化成功，之后才隐藏窗口。
+    pub fn snooze_current(&self, hours: i64) -> AppResult<ReminderSnoozeResult> {
+        if !self.presenter.is_visible()? {
+            return Err(AppError::Validation("当前没有可暂停的提醒".into()));
+        }
+        let agent_key = self
+            .presenter
+            .current_agent_key()?
+            .ok_or_else(|| AppError::Validation("当前提醒缺少 Agent 上下文".into()))?;
+
+        // DB 失败时不得先隐藏；用户仍能看见原提醒并重试。
+        let result = self.snooze_agent(&agent_key, hours)?;
+        self.presenter.hide()?;
+        self.memory.lock().unwrap().last_payload = None;
+        Ok(result)
+    }
+
+    /// Settings 页列出仍处于暂停期的 Agent；过期值无需写清理即可视为可提醒。
+    pub fn list_agent_snoozes(&self) -> AppResult<Vec<ReminderSnoozeResult>> {
+        let now = self.clock.now_utc();
+        Ok(self
+            .state_repo
+            .list_snoozed_until()?
+            .into_iter()
+            .filter(|entry| entry.snoozed_until > now)
+            .collect())
+    }
+
+    /// Settings 页恢复指定 Agent；只清除该 Agent 的暂停时间。
+    pub fn resume_agent(&self, agent_key: &str) -> AppResult<()> {
+        self.state_repo.set_snoozed_until(agent_key, None)?;
+        eprintln!("[agenttips] reminder_resumed agent_id={agent_key}");
+        Ok(())
+    }
+
     /// Settings 页读取当前冷却配置。
     pub fn get_settings(&self) -> AppResult<ReminderSettings> {
         self.state_repo.get_settings()
@@ -105,6 +159,21 @@ impl ReminderCoordinator {
                 };
             }
         };
+
+        let snoozed_until = match self.state_repo.snoozed_until(agent_key) {
+            Ok(value) => value,
+            Err(err) => {
+                return ReminderDecision::Error {
+                    reason: format!("SNOOZE_READ_FAILED: {err}"),
+                };
+            }
+        };
+        let snooze_remaining = snooze_remaining_secs(snoozed_until, now);
+        if snooze_remaining > 0 {
+            return ReminderDecision::SkipSnoozed {
+                remaining_secs: snooze_remaining,
+            };
+        }
 
         let tips = match self.eligibility.eligible_tips(agent_key) {
             Ok(tips) => tips,
@@ -236,13 +305,23 @@ impl ReminderCoordinatorPort for ReminderCoordinator {
             _ => None,
         };
 
-        if let Some(ReminderDecision::SkipCooldown { remaining_secs }) = decision {
+        if let Some(ReminderDecision::SkipCooldown { remaining_secs }) = &decision {
             let agent = match result {
                 DetectionResult::Matched { agent_id, .. } => agent_id.as_str(),
                 _ => "<none>",
             };
             eprintln!(
                 "[agenttips] reminder_skipped agent_id={} reason=cooldown remaining_secs={}",
+                agent, remaining_secs
+            );
+        }
+        if let Some(ReminderDecision::SkipSnoozed { remaining_secs }) = &decision {
+            let agent = match result {
+                DetectionResult::Matched { agent_id, .. } => agent_id.as_str(),
+                _ => "<none>",
+            };
+            eprintln!(
+                "[agenttips] reminder_skipped agent_id={} reason=snoozed remaining_secs={}",
                 agent, remaining_secs
             );
         }
@@ -303,7 +382,9 @@ mod tests {
     struct FakeStateRepo {
         cooldown_minutes: StdMutex<i64>,
         last_shown: StdMutex<HashMap<String, DateTime<Utc>>>,
+        snoozed: StdMutex<HashMap<String, DateTime<Utc>>>,
         fail_persist: StdMutex<bool>,
+        fail_snooze_persist: StdMutex<bool>,
     }
     impl ReminderStateRepositoryPort for FakeStateRepo {
         fn get_settings(&self) -> AppResult<ReminderSettings> {
@@ -332,6 +413,37 @@ mod tests {
                 .lock()
                 .unwrap()
                 .insert(agent_key.to_string(), at);
+            Ok(())
+        }
+        fn snoozed_until(&self, agent_key: &str) -> AppResult<Option<DateTime<Utc>>> {
+            Ok(self.snoozed.lock().unwrap().get(agent_key).copied())
+        }
+        fn list_snoozed_until(&self) -> AppResult<Vec<ReminderSnoozeResult>> {
+            Ok(self
+                .snoozed
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(agent_key, snoozed_until)| ReminderSnoozeResult {
+                    agent_key: agent_key.clone(),
+                    snoozed_until: *snoozed_until,
+                })
+                .collect())
+        }
+        fn set_snoozed_until(
+            &self,
+            agent_key: &str,
+            until: Option<DateTime<Utc>>,
+        ) -> AppResult<()> {
+            if *self.fail_snooze_persist.lock().unwrap() {
+                return Err(AppError::Database("模拟暂停提醒持久化失败".into()));
+            }
+            let mut snoozed = self.snoozed.lock().unwrap();
+            if let Some(until) = until {
+                snoozed.insert(agent_key.to_string(), until);
+            } else {
+                snoozed.remove(agent_key);
+            }
             Ok(())
         }
     }
@@ -783,6 +895,172 @@ mod tests {
         h.coordinator
             .on_detection_change(&matched("cursor"), &entered("cursor"));
         assert!(h.presenter.shown.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn snooze_current_persists_then_hides() {
+        let h = harness();
+        h.eligibility
+            .tips
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), vec![tip(1)]);
+        h.coordinator
+            .on_detection_change(&matched("cursor"), &entered("cursor"));
+
+        let result = h.coordinator.snooze_current(4).unwrap();
+
+        assert_eq!(result.agent_key, "cursor");
+        assert_eq!(result.snoozed_until, h.base + chrono::Duration::hours(4));
+        assert_eq!(
+            h.state.snoozed.lock().unwrap().get("cursor"),
+            Some(&result.snoozed_until)
+        );
+        assert!(!*h.presenter.visible.lock().unwrap());
+        assert_eq!(*h.presenter.hidden.lock().unwrap(), 1);
+        assert!(h.coordinator.current_payload().is_none());
+    }
+
+    #[test]
+    fn settings_snoozes_agents_independently_and_resumes_only_one() {
+        let h = harness();
+
+        let cursor = h.coordinator.snooze_agent("cursor", 4).unwrap();
+        let codex = h.coordinator.snooze_agent("codex", 8).unwrap();
+
+        assert_eq!(cursor.snoozed_until, h.base + chrono::Duration::hours(4));
+        assert_eq!(codex.snoozed_until, h.base + chrono::Duration::hours(8));
+        let listed = h.coordinator.list_agent_snoozes().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|entry| entry.agent_key == "cursor"));
+        assert!(listed.iter().any(|entry| entry.agent_key == "codex"));
+        assert_eq!(*h.presenter.hidden.lock().unwrap(), 0);
+
+        h.coordinator.resume_agent("cursor").unwrap();
+
+        assert_eq!(h.state.snoozed.lock().unwrap().get("cursor"), None);
+        assert_eq!(
+            h.state.snoozed.lock().unwrap().get("codex"),
+            Some(&codex.snoozed_until)
+        );
+        let listed = h.coordinator.list_agent_snoozes().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].agent_key, "codex");
+    }
+
+    #[test]
+    fn settings_snooze_list_excludes_expired_rows() {
+        let h = harness();
+        h.state
+            .snoozed
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), h.base - chrono::Duration::seconds(1));
+        h.state
+            .snoozed
+            .lock()
+            .unwrap()
+            .insert("codex".into(), h.base + chrono::Duration::hours(2));
+
+        let listed = h.coordinator.list_agent_snoozes().unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].agent_key, "codex");
+    }
+
+    #[test]
+    fn snooze_without_current_agent_is_rejected() {
+        let h = harness();
+        assert!(h.coordinator.snooze_current(4).is_err());
+        assert!(h.state.snoozed.lock().unwrap().is_empty());
+        assert_eq!(*h.presenter.hidden.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn snooze_persistence_failure_keeps_reminder_visible() {
+        let h = harness();
+        h.eligibility
+            .tips
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), vec![tip(1)]);
+        h.coordinator
+            .on_detection_change(&matched("cursor"), &entered("cursor"));
+        *h.state.fail_snooze_persist.lock().unwrap() = true;
+
+        assert!(h.coordinator.snooze_current(4).is_err());
+
+        assert!(*h.presenter.visible.lock().unwrap());
+        assert_eq!(*h.presenter.hidden.lock().unwrap(), 0);
+        assert!(h.coordinator.current_payload().is_some());
+    }
+
+    #[test]
+    fn snoozed_agent_is_skipped_without_advancing_cooldown() {
+        let h = harness();
+        h.eligibility
+            .tips
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), vec![tip(1)]);
+        h.state
+            .snoozed
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), h.base + chrono::Duration::hours(4));
+
+        h.coordinator
+            .on_detection_change(&matched("cursor"), &entered("cursor"));
+
+        assert!(h.presenter.shown.lock().unwrap().is_empty());
+        assert!(h.state.last_shown.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn another_agent_is_not_blocked_by_snooze() {
+        let h = harness();
+        h.eligibility
+            .tips
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), vec![tip(1)]);
+        h.eligibility
+            .tips
+            .lock()
+            .unwrap()
+            .insert("codex".into(), vec![tip(2)]);
+        h.state
+            .snoozed
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), h.base + chrono::Duration::hours(4));
+
+        h.coordinator
+            .on_detection_change(&matched("cursor"), &entered("cursor"));
+        h.coordinator
+            .on_detection_change(&matched("codex"), &changed("cursor", "codex"));
+
+        assert_eq!(h.presenter.shown.lock().unwrap().as_slice(), ["codex"]);
+    }
+
+    #[test]
+    fn expired_snooze_returns_to_normal_evaluation() {
+        let h = harness();
+        h.eligibility
+            .tips
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), vec![tip(1)]);
+        h.state
+            .snoozed
+            .lock()
+            .unwrap()
+            .insert("cursor".into(), h.base - chrono::Duration::seconds(1));
+
+        h.coordinator
+            .on_detection_change(&matched("cursor"), &entered("cursor"));
+
+        assert_eq!(h.presenter.shown.lock().unwrap().as_slice(), ["cursor"]);
     }
 
     #[test]

@@ -1,11 +1,14 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
 import { Keyboard, Loader2 } from "lucide-react";
+import { AgentSnoozeMenu } from "@/components/shared/AgentSnoozeMenu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { desktopErrorMessage } from "@/desktop-api/contract";
 import type {
   DesktopApi,
+  Agent,
   HotkeyBinding,
   HotkeyCandidate,
   HotkeyPreviewResult,
@@ -319,11 +322,200 @@ export function HotkeyRecorder({ api, initial }: HotkeyRecorderProps) {
 
 const SECTIONS: Array<{ id: string; label: string; disabled?: boolean }> = [
   { id: "hotkey", label: "快捷键" },
-  { id: "regular", label: "常规", disabled: true },
+  { id: "agents", label: "Agent" },
   { id: "reminder", label: "提醒" },
   { id: "data", label: "数据", disabled: true },
   { id: "about", label: "关于", disabled: true },
 ];
+
+export function AgentPreferencesSection({ api }: { api: DesktopApi }) {
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [snoozedUntilByAgent, setSnoozedUntilByAgent] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.listAgents(), api.getAgentReminderSnoozes()])
+      .then(([list, snoozes]) => {
+        if (cancelled) return;
+        setAgents(list);
+        setSnoozedUntilByAgent(
+          Object.fromEntries(snoozes.map((entry) => [entry.agentKey, entry.snoozedUntil])),
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) setError(`加载 Agent 设置失败：${desktopErrorMessage(err)}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  async function handleAgentEnabledChange(agentId: string, enabled: boolean) {
+    setPendingAction(`enabled:${agentId}`);
+    setError(null);
+    setFeedback(null);
+    try {
+      const updated = await api.updateAgentEnabled(agentId, enabled);
+      setAgents((current) => current.map((agent) => (agent.id === updated.id ? updated : agent)));
+    } catch (err) {
+      setError(`更新 Agent 设置失败：${desktopErrorMessage(err)}`);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleAgentSnooze(agent: Agent, hours: number) {
+    setPendingAction(`snooze:${agent.key}`);
+    setError(null);
+    setFeedback(null);
+    try {
+      const updated = await api.snoozeAgentReminders(agent.key, hours);
+      setSnoozedUntilByAgent((current) => ({
+        ...current,
+        [updated.agentKey]: updated.snoozedUntil,
+      }));
+      setFeedback(`已暂停 ${agent.name} 提醒 ${hours} 小时`);
+    } catch (err) {
+      setError(`暂停 ${agent.name} 提醒失败：${desktopErrorMessage(err)}`);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleAgentResume(agent: Agent) {
+    setPendingAction(`resume:${agent.key}`);
+    setError(null);
+    setFeedback(null);
+    try {
+      await api.resumeAgentReminders(agent.key);
+      setSnoozedUntilByAgent((current) => {
+        const next = { ...current };
+        delete next[agent.key];
+        return next;
+      });
+      setFeedback(`已恢复 ${agent.name} 提醒`);
+    } catch (err) {
+      setError(`恢复 ${agent.name} 提醒失败：${desktopErrorMessage(err)}`);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  if (loading) {
+    return <p className="text-secondary-size text-text-muted">加载中…</p>;
+  }
+
+  const groups: Array<{ kind: Agent["kind"]; label: string }> = [
+    { kind: "desktop", label: "桌面 Agent" },
+    { kind: "terminal", label: "终端 Agent" },
+  ];
+
+  return (
+    <div className="mx-auto flex max-w-xl flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-section font-semibold">我使用的 Agent</h3>
+        <p className="text-secondary-size text-text-muted">
+          可为每个 Agent
+          独立暂停提醒。关闭后不会再出现在新绑定和筛选列表中，也不会触发提醒；已有绑定会保留。
+        </p>
+      </div>
+      {groups.map((group) => (
+        <section key={group.kind} className="flex flex-col gap-2" aria-label={group.label}>
+          <h4 className="text-secondary-size font-medium text-text-secondary">{group.label}</h4>
+          <div className="divide-y divide-border-subtle rounded-lg border border-border-subtle">
+            {agents
+              .filter((agent) => agent.kind === group.kind)
+              .map((agent) => {
+                const snoozedUntil = snoozedUntilByAgent[agent.key];
+                const actionPending = pendingAction?.endsWith(agent.key) ?? false;
+                return (
+                  <div
+                    key={agent.id}
+                    className="flex items-center justify-between gap-4 px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-body font-medium">{agent.name}</p>
+                      <p className="truncate text-caption text-text-muted">{agent.key}</p>
+                      <p
+                        className={cn(
+                          "mt-0.5 truncate text-caption",
+                          snoozedUntil ? "text-warning" : "text-text-muted",
+                        )}
+                        data-testid={`agent-snooze-status-${agent.key}`}
+                      >
+                        {snoozedUntil
+                          ? `提醒已暂停至 ${formatSnoozedUntil(snoozedUntil)}`
+                          : "提醒正常"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <AgentSnoozeMenu
+                        pending={actionPending}
+                        disabled={!agent.enabled || pendingAction !== null}
+                        buttonLabel={snoozedUntil ? "延长暂停" : "暂停提醒"}
+                        ariaLabel={`暂停 ${agent.name} 提醒`}
+                        menuLabel={`暂停 ${agent.name} 提醒`}
+                        onSelect={(hours) => void handleAgentSnooze(agent, hours)}
+                      />
+                      {snoozedUntil && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={pendingAction !== null}
+                          aria-label={`恢复 ${agent.name} 提醒`}
+                          onClick={() => void handleAgentResume(agent)}
+                        >
+                          恢复
+                        </Button>
+                      )}
+                      <Switch
+                        checked={agent.enabled}
+                        disabled={pendingAction !== null}
+                        aria-label={`使用 ${agent.name}`}
+                        onCheckedChange={(enabled) =>
+                          void handleAgentEnabledChange(agent.id, enabled)
+                        }
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </section>
+      ))}
+      {error && (
+        <p className="text-secondary-size text-danger" role="alert">
+          {error}
+        </p>
+      )}
+      {feedback && (
+        <p className="text-secondary-size text-success" role="status">
+          {feedback}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function formatSnoozedUntil(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
 
 function ReminderSettingsSection({ api }: { api: DesktopApi }) {
   const [value, setValue] = useState("15");
@@ -511,6 +703,8 @@ export default function HotkeySettingsWindow({ api }: HotkeySettingsWindowProps)
                 <p className="text-secondary-size text-text-muted">加载中…</p>
               )}
             </div>
+          ) : section === "agents" ? (
+            <AgentPreferencesSection api={api} />
           ) : section === "reminder" ? (
             <ReminderSettingsSection api={api} />
           ) : (

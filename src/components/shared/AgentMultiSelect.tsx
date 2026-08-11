@@ -32,6 +32,7 @@ export function AgentMultiSelect({
   onMenuClosed,
 }: AgentMultiSelectProps) {
   const selected = agents.filter((agent) => selectedIds.includes(agent.id));
+  const selectableAgents = agents.filter((agent) => agent.enabled);
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col gap-2">
@@ -73,7 +74,10 @@ export function AgentMultiSelect({
         <DropdownMenuContent align="start" className="w-64">
           <DropdownMenuLabel>选择要绑定的 Agent</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {agents.map((agent) => {
+          {selectableAgents.length === 0 && (
+            <DropdownMenuItem disabled>请先在设置中启用 Agent</DropdownMenuItem>
+          )}
+          {selectableAgents.map((agent) => {
             const checked = selectedIds.includes(agent.id);
             return (
               <DropdownMenuItem

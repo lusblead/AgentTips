@@ -42,6 +42,21 @@ describe("TauriDesktopApi", () => {
     expect(invokeMock).toHaveBeenCalledWith("agent_list");
   });
 
+  it("updateAgentEnabled 调用 agent_update_enabled", async () => {
+    invokeMock.mockResolvedValue({
+      id: CURSOR_AGENT_ID,
+      key: "cursor",
+      name: "Cursor",
+      enabled: false,
+    });
+    const updated = await api.updateAgentEnabled(CURSOR_AGENT_ID, false);
+    expect(invokeMock).toHaveBeenCalledWith("agent_update_enabled", {
+      agentId: CURSOR_AGENT_ID,
+      enabled: false,
+    });
+    expect(updated.enabled).toBe(false);
+  });
+
   it("createTip 使用输入参数调用 tip_create", async () => {
     invokeMock.mockResolvedValue({ id: "tip-1", bindings: [] });
     const input = createInput();
@@ -172,6 +187,40 @@ describe("TauriDesktopApi", () => {
     invokeMock.mockResolvedValue(undefined);
     await api.dismissReminder();
     expect(invokeMock).toHaveBeenCalledWith("reminder_dismiss");
+  });
+
+  it("snoozeReminder 调用按 Agent 暂停命令", async () => {
+    invokeMock.mockResolvedValue({
+      agentKey: "cursor",
+      snoozedUntil: "2026-08-08T04:00:00Z",
+    });
+    const result = await api.snoozeReminder(4);
+    expect(invokeMock).toHaveBeenCalledWith("reminder_snooze", { hours: 4 });
+    expect(result.agentKey).toBe("cursor");
+  });
+
+  it("Agent 设置页按 Agent 查询、暂停和恢复提醒", async () => {
+    invokeMock.mockResolvedValueOnce([
+      { agentKey: "cursor", snoozedUntil: "2026-08-08T04:00:00Z" },
+    ]);
+    await expect(api.getAgentReminderSnoozes()).resolves.toHaveLength(1);
+    expect(invokeMock).toHaveBeenLastCalledWith("reminder_list_agent_snoozes");
+
+    invokeMock.mockResolvedValueOnce({
+      agentKey: "claude-code",
+      snoozedUntil: "2026-08-08T08:00:00Z",
+    });
+    await api.snoozeAgentReminders("claude-code", 8);
+    expect(invokeMock).toHaveBeenLastCalledWith("reminder_snooze_agent", {
+      agentKey: "claude-code",
+      hours: 8,
+    });
+
+    invokeMock.mockResolvedValueOnce(undefined);
+    await api.resumeAgentReminders("claude-code");
+    expect(invokeMock).toHaveBeenLastCalledWith("reminder_resume_agent", {
+      agentKey: "claude-code",
+    });
   });
 
   it("getCurrentReminderPayload 兜底拉取当前 payload", async () => {

@@ -5,7 +5,9 @@ use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
 
 use crate::domain::color::NoteColorKey;
-use crate::domain::reminder::{validate_cooldown_minutes, ReminderSettings, ReminderTip};
+use crate::domain::reminder::{
+    validate_cooldown_minutes, ReminderSettings, ReminderSnoozeResult, ReminderTip,
+};
 use crate::error::{AppError, AppResult};
 use crate::ports::reminder::{AgentIdentity, ReminderEligibilityPort, ReminderStateRepositoryPort};
 
@@ -87,15 +89,15 @@ impl ReminderStateRepositoryPort for SqliteReminderStateRepository {
     fn last_shown_at(&self, agent_key: &str) -> AppResult<Option<DateTime<Utc>>> {
         self.db.with_conn(|conn| {
             let agent_id = self.agent_db_id(conn, agent_key)?;
-            let raw: Option<String> = conn
+            let raw: Option<Option<String>> = conn
                 .query_row(
                     "SELECT last_shown_at FROM agent_reminder_state WHERE agent_id = ?1",
                     params![agent_id],
-                    |row| row.get(0),
+                    |row| row.get::<_, Option<String>>(0),
                 )
                 .optional()
                 .map_err(AppError::from)?;
-            raw.map(|value| parse_rfc(&value)).transpose()
+            raw.flatten().map(|value| parse_rfc(&value)).transpose()
         })
     }
 
@@ -108,6 +110,66 @@ impl ReminderStateRepositoryPort for SqliteReminderStateRepository {
                  ON CONFLICT(agent_id) DO UPDATE SET last_shown_at = excluded.last_shown_at,
                                                       updated_at = excluded.updated_at",
                 params![agent_id, at.to_rfc3339()],
+            )
+            .map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
+    fn snoozed_until(&self, agent_key: &str) -> AppResult<Option<DateTime<Utc>>> {
+        self.db.with_conn(|conn| {
+            let agent_id = self.agent_db_id(conn, agent_key)?;
+            let raw: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT snoozed_until FROM agent_reminder_state WHERE agent_id = ?1",
+                    params![agent_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(AppError::from)?;
+            raw.flatten().map(|value| parse_rfc(&value)).transpose()
+        })
+    }
+
+    fn list_snoozed_until(&self) -> AppResult<Vec<ReminderSnoozeResult>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT a.key, s.snoozed_until
+                     FROM agent_reminder_state s
+                     JOIN agents a ON a.id = s.agent_id
+                     WHERE s.snoozed_until IS NOT NULL
+                     ORDER BY a.key ASC",
+                )
+                .map_err(AppError::from)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(AppError::from)?;
+            rows.map(|row| {
+                let (agent_key, raw_until) = row.map_err(AppError::from)?;
+                Ok(ReminderSnoozeResult {
+                    agent_key,
+                    snoozed_until: parse_rfc(&raw_until)?,
+                })
+            })
+            .collect()
+        })
+    }
+
+    fn set_snoozed_until(&self, agent_key: &str, until: Option<DateTime<Utc>>) -> AppResult<()> {
+        self.db.with_conn(|conn| {
+            let agent_id = self.agent_db_id(conn, agent_key)?;
+            let updated_at = Utc::now().to_rfc3339();
+            let snoozed_until = until.map(|value| value.to_rfc3339());
+            conn.execute(
+                "INSERT INTO agent_reminder_state
+                    (agent_id, last_shown_at, snoozed_until, updated_at)
+                 VALUES (?1, NULL, ?2, ?3)
+                 ON CONFLICT(agent_id) DO UPDATE SET snoozed_until = excluded.snoozed_until,
+                                                      updated_at = excluded.updated_at",
+                params![agent_id, snoozed_until, updated_at],
             )
             .map_err(AppError::from)?;
             Ok(())
@@ -132,7 +194,8 @@ impl ReminderEligibilityPort for SqliteReminderEligibility {
         self.db.with_conn(|conn| {
             let row: Option<(String, String)> = conn
                 .query_row(
-                    "SELECT id, name FROM agents WHERE key = ?1",
+                    "SELECT id, name FROM agents
+                     WHERE key = ?1 AND enabled = 1 AND reminder_enabled = 1",
                     params![agent_key],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -162,6 +225,8 @@ impl ReminderEligibilityPort for SqliteReminderEligibility {
                      JOIN tips t ON t.id = ta.tip_id
                      JOIN agents a ON a.id = ta.agent_id
                      WHERE a.key = ?1
+                       AND a.enabled = 1
+                       AND a.reminder_enabled = 1
                        AND ta.auto_attach = 1
                        AND t.status = 'active'
                        AND t.deleted_at IS NULL
@@ -276,7 +341,7 @@ mod tests {
                     .unwrap())
             })
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
 
     #[test]
@@ -319,15 +384,50 @@ mod tests {
     }
 
     #[test]
+    fn snooze_is_persisted_per_agent() {
+        let (_, repo, _) = setup();
+        let cursor_until = Utc.timestamp_opt(5_000, 0).unwrap();
+        let codex_until = Utc.timestamp_opt(8_000, 0).unwrap();
+
+        repo.set_snoozed_until("cursor", Some(cursor_until))
+            .unwrap();
+        repo.set_snoozed_until("codex", Some(codex_until)).unwrap();
+
+        assert_eq!(repo.snoozed_until("cursor").unwrap(), Some(cursor_until));
+        assert_eq!(repo.snoozed_until("codex-cli").unwrap(), Some(codex_until));
+        assert_eq!(repo.last_shown_at("cursor").unwrap(), None);
+
+        let listed = repo.list_snoozed_until().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed
+            .iter()
+            .any(|entry| entry.agent_key == "cursor" && entry.snoozed_until == cursor_until));
+        assert!(listed
+            .iter()
+            .any(|entry| { entry.agent_key == "codex-cli" && entry.snoozed_until == codex_until }));
+
+        repo.set_snoozed_until("cursor", None).unwrap();
+        assert_eq!(repo.snoozed_until("cursor").unwrap(), None);
+        assert_eq!(repo.snoozed_until("codex").unwrap(), Some(codex_until));
+        let listed = repo.list_snoozed_until().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].agent_key, "codex-cli");
+    }
+
+    #[test]
     fn restart_reads_states() {
         let db = Arc::new(SqliteDatabase::open_in_memory().unwrap());
         let repo = SqliteReminderStateRepository::new(db.clone());
         let t = Utc.timestamp_opt(1234, 0).unwrap();
+        let snoozed_until = Utc.timestamp_opt(5678, 0).unwrap();
         repo.set_last_shown_at("codex-cli", t).unwrap();
+        repo.set_snoozed_until("cursor", Some(snoozed_until))
+            .unwrap();
         repo.update_settings(7).unwrap();
         // 重开（新连接/migration 幂等）后仍能读回
         let repo2 = SqliteReminderStateRepository::new(db);
         assert_eq!(repo2.last_shown_at("codex-cli").unwrap(), Some(t));
+        assert_eq!(repo2.snoozed_until("cursor").unwrap(), Some(snoozed_until));
         assert_eq!(repo2.get_settings().unwrap().cooldown_minutes, 7);
     }
 
@@ -336,6 +436,9 @@ mod tests {
         let (_, repo, _) = setup();
         assert!(repo.set_last_shown_at("unknown-agent", Utc::now()).is_err());
         assert!(repo.last_shown_at("unknown-agent").is_err());
+        assert!(repo
+            .set_snoozed_until("unknown-agent", Some(Utc::now()))
+            .is_err());
     }
 
     #[test]
@@ -396,6 +499,55 @@ mod tests {
         let cursor_tips = eligibility.eligible_tips("cursor").unwrap();
         assert_eq!(cursor_tips.len(), 1);
         assert_eq!(cursor_tips[0].body, "C");
+    }
+
+    #[test]
+    fn disabled_agent_is_not_reminder_eligible() {
+        let (db, _, eligibility) = setup();
+        insert_tip(
+            &db,
+            "66666666-6666-6666-6666-666666666666",
+            "disabled",
+            "cursor",
+            true,
+            false,
+            false,
+        );
+        db.with_conn(|conn| {
+            conn.execute("UPDATE agents SET enabled = 0 WHERE key = 'cursor'", [])
+                .map_err(AppError::from)?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(eligibility.agent_info("cursor").unwrap(), None);
+        assert!(eligibility.eligible_tips("cursor").unwrap().is_empty());
+    }
+
+    #[test]
+    fn reminder_disabled_agent_is_not_reminder_eligible() {
+        let (db, _, eligibility) = setup();
+        insert_tip(
+            &db,
+            "77777777-7777-7777-7777-777777777777",
+            "reminder disabled",
+            "cursor",
+            true,
+            false,
+            false,
+        );
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE agents SET reminder_enabled = 0 WHERE key = 'cursor'",
+                [],
+            )
+            .map_err(AppError::from)?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(eligibility.agent_info("cursor").unwrap(), None);
+        assert!(eligibility.eligible_tips("cursor").unwrap().is_empty());
     }
 
     #[test]

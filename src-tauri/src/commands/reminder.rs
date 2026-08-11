@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::domain::reminder::{ReminderPayload, ReminderSettings};
+use crate::domain::reminder::{ReminderPayload, ReminderSettings, ReminderSnoozeResult};
 use crate::error::AppErrorDto;
 use crate::AppState;
 
@@ -23,6 +23,50 @@ pub fn reminder_settings_update(
 #[tauri::command]
 pub fn reminder_dismiss(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
     state.reminder.dismiss().map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub fn reminder_snooze(
+    state: State<'_, AppState>,
+    hours: i64,
+) -> Result<ReminderSnoozeResult, AppErrorDto> {
+    state
+        .reminder
+        .snooze_current(hours)
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub fn reminder_list_agent_snoozes(
+    state: State<'_, AppState>,
+) -> Result<Vec<ReminderSnoozeResult>, AppErrorDto> {
+    state
+        .reminder
+        .list_agent_snoozes()
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub fn reminder_snooze_agent(
+    state: State<'_, AppState>,
+    agent_key: String,
+    hours: i64,
+) -> Result<ReminderSnoozeResult, AppErrorDto> {
+    state
+        .reminder
+        .snooze_agent(&agent_key, hours)
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub fn reminder_resume_agent(
+    state: State<'_, AppState>,
+    agent_key: String,
+) -> Result<(), AppErrorDto> {
+    state
+        .reminder
+        .resume_agent(&agent_key)
+        .map_err(AppErrorDto::from)
 }
 
 #[tauri::command]

@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::domain::reminder::{ReminderPayload, ReminderSettings, ReminderTip};
+use crate::domain::reminder::{
+    ReminderPayload, ReminderSettings, ReminderSnoozeResult, ReminderTip,
+};
 use crate::error::AppResult;
 
 /// Agent 身份（detection key → DB stable id + 展示名）。
@@ -30,6 +32,12 @@ pub trait ReminderStateRepositoryPort: Send + Sync {
     fn last_shown_at(&self, agent_key: &str) -> AppResult<Option<DateTime<Utc>>>;
     /// 记录某 Agent（按 key）Reminder 成功显示时间。
     fn set_last_shown_at(&self, agent_key: &str, at: DateTime<Utc>) -> AppResult<()>;
+    /// 某 Agent（按 key）当前持久化的暂停提醒截止时间。
+    fn snoozed_until(&self, agent_key: &str) -> AppResult<Option<DateTime<Utc>>>;
+    /// 列出所有已持久化的 Agent 暂停截止时间；application 层负责过滤已过期值。
+    fn list_snoozed_until(&self) -> AppResult<Vec<ReminderSnoozeResult>>;
+    /// 设置或清除某 Agent（按 key）的暂停提醒截止时间。
+    fn set_snoozed_until(&self, agent_key: &str, until: Option<DateTime<Utc>>) -> AppResult<()>;
 }
 
 /// Reminder 展示端口（Application 不感知 WebviewWindow / HWND / Tauri Event）。

@@ -7,6 +7,7 @@
     <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white">
     <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
     <img alt="Rust 2021" src="https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white">
+    <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-green">
   </p>
 </div>
 
@@ -19,11 +20,11 @@ AgentTips 解决一个很具体的问题：使用多个 AI 编程工具时，重
 - **全局快捷记录**：默认按 `Ctrl + F12` 打开紧凑的新建便签窗口；快捷键可在设置中重新录制。
 - **无标题便签**：新便签直接填写正文，不需要额外维护标题。
 - **自由标签**：标签由使用者直接输入，也可以复用过去写过的标签。
-- **Agent 绑定**：一条便签可绑定一个、多个或不绑定 Agent；开启“默认携带”后，可在对应 Agent 激活时参与提醒。
+- **Agent 绑定**：可先在设置中选择自己使用的 Agent；一条便签可绑定一个、多个或不绑定 Agent，停用 Agent 不会删除已有绑定。
 - **自动识别**：通过 Windows 前台窗口和终端进程树识别当前桌面或命令行 Agent。
-- **冷却提醒**：按 Agent 独立控制提醒冷却时间，默认 15 分钟，可在 1～120 分钟之间调整。
+- **冷却与稍后提醒**：按 Agent 独立控制提醒冷却时间；既可在提醒弹窗暂停当前 Agent，也可在设置中直接选择任意 Agent 暂停 1、2、4、8 或 24 小时并单独恢复。
 - **便签管理**：支持搜索、Agent 筛选、直接编辑、彩色便签、标记已使用、撤销和恢复。
-- **桌面运行体验**：支持多窗口、系统托盘、单实例运行和未保存草稿保护。
+- **桌面运行体验**：支持多窗口、系统托盘、单实例运行和未保存草稿保护；左键单击托盘图标可直接唤出主界面。
 
 ## 内置 Agent
 
@@ -36,7 +37,13 @@ AgentTips 解决一个很具体的问题：使用多个 AI 编程工具时，重
 
 ## 快速开始
 
-### 环境要求
+### 安装发布版
+
+前往 [GitHub Releases](https://github.com/lusblead/AgentTips/releases/latest)，下载 Windows x64 的 `.exe`（NSIS，推荐）或 `.msi` 安装包。Release 同时提供 `SHA256SUMS.txt`，可用于核对下载文件的 SHA-256 摘要。
+
+当前安装包尚未进行代码签名，Windows 可能显示 Microsoft Defender SmartScreen 提示。请只从本仓库的 GitHub Releases 下载，并在继续安装前核对发布者、版本与摘要。
+
+### 源码环境要求
 
 - Windows
 - Node.js 与 pnpm
@@ -52,12 +59,20 @@ pnpm install --frozen-lockfile
 pnpm tauri dev
 ```
 
+`pnpm tauri dev` 会启动 Vite、Cargo 和 Tauri 开发进程，适合调试，不适合作为日常桌面快捷方式。首次配置或源码更新后，可构建 Release 程序并安装无控制台的桌面快捷方式：
+
+```powershell
+pnpm desktop:install
+```
+
+之后直接打开桌面的 `AgentTips`；快捷方式会启动 `src-tauri/target/release/agent-tips.exe`，不会经过 CMD、pnpm 或开发服务器。
+
 首次启动后：
 
 1. 按 `Ctrl + F12` 打开快捷便签。
 2. 写入正文，并按需添加标签、绑定 Agent、开启默认携带。
 3. 保存后可在主窗口继续搜索、编辑或标记为已使用。
-4. 在设置中可以修改全局快捷键和提醒冷却时间。
+4. 在设置中选择自己使用的 Agent，按 Agent 独立暂停或恢复提醒，并可修改全局快捷键和默认提醒冷却时间。
 
 如果默认快捷键被其他软件占用，请从主窗口菜单进入“设置”，重新录制一个 `Ctrl + 单键` 组合。切换失败时应用会保留原快捷键。
 
@@ -132,12 +147,12 @@ scripts/                架构检查与 Windows 运行验证
 - 当前只支持 Windows 原生运行。
 - 不提供云同步、跨设备同步、浏览器扩展或自动向 Agent 发送内容。
 - Agent 识别是基于本机进程身份的规则匹配，不是外部应用提供的稳定集成接口。
-- 当前没有签名发布包；从源码构建的安装包可能触发 Windows 安全提示。
+- 当前没有代码签名证书；GitHub Release 和源码构建的安装包都可能触发 Windows 安全提示。
 
 ## 参与贡献
 
-欢迎通过 [Issues](https://github.com/lusblead/AgentTips/issues) 报告可复现问题或提出改进建议。提交 Pull Request 前，请至少运行与变更相关的前端测试、Rust 测试和构建检查，并避免提交本地数据库、运行日志或生成产物。
+欢迎通过 [Issues](https://github.com/lusblead/AgentTips/issues) 报告可复现问题或提出改进建议。提交 Pull Request 前，请至少运行与变更相关的前端测试、Rust 测试和构建检查，并避免提交本地数据库、运行日志或生成产物。提交贡献即表示同意按本项目的 MIT License 许可该贡献。
 
 ## 许可证
 
-本仓库目前尚未附带开源许可证。在许可证明确之前，公开可见的源代码不代表已授予复制、修改或分发许可。
+本项目采用 [MIT License](LICENSE)。

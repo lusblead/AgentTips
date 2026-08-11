@@ -71,6 +71,13 @@ export default function NoteLibraryWindow({
   const [toast, setToast] = useState<UndoToast | null>(null);
   const [leavingIds, setLeavingIds] = useState<string[]>([]);
 
+  const applyAgentList = useCallback((list: Agent[]) => {
+    setAgents(list);
+    if (list.length === 0) return;
+    const enabledIds = new Set(list.filter((agent) => agent.enabled).map((agent) => agent.id));
+    setSelectedAgentIds((current) => current.filter((id) => enabledIds.has(id)));
+  }, []);
+
   const loadTips = useCallback(
     async (used: boolean) => {
       setLoadError(null);
@@ -90,7 +97,7 @@ export default function NoteLibraryWindow({
     api
       .listAgents()
       .then((list) => {
-        if (!cancelled) setAgents(list);
+        if (!cancelled) applyAgentList(list);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(desktopErrorMessage(err));
@@ -101,7 +108,7 @@ export default function NoteLibraryWindow({
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, applyAgentList]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,10 +132,14 @@ export default function NoteLibraryWindow({
   useEffect(() => {
     function onFocus() {
       void loadTips(view === "used");
+      void api
+        .listAgents()
+        .then(applyAgentList)
+        .catch((err) => setLoadError(desktopErrorMessage(err)));
     }
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [loadTips, view]);
+  }, [api, applyAgentList, loadTips, view]);
 
   // Cmd/Ctrl + F 展开搜索
   useEffect(() => {
@@ -155,6 +166,8 @@ export default function NoteLibraryWindow({
   }, [toast]);
 
   const sourceTips = view === "used" ? usedTips : tips;
+  const enabledAgents = useMemo(() => agents.filter((agent) => agent.enabled), [agents]);
+
   const filteredTips = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return sourceTips.filter((tip) => {
@@ -350,7 +363,7 @@ export default function NoteLibraryWindow({
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-56">
                   <p className="px-2 py-1 text-secondary-size font-medium text-text-muted">Agent</p>
-                  {agents.map((agent) => {
+                  {enabledAgents.map((agent) => {
                     const checked = selectedAgentIds.includes(agent.id);
                     return (
                       <div
